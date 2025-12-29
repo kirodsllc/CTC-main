@@ -8,10 +8,21 @@ dotenv.config({ path: envPath, override: true });
 
 // Force SQLite DATABASE_URL for this project (override any system/env vars)
 // This ensures we always use SQLite regardless of what's in system environment
+// Always resolve to absolute path to avoid path issues when running from dist/
+const backendRoot = path.resolve(__dirname, '../..');
+const dbPath = path.resolve(backendRoot, 'prisma/dev.db');
+
 if (!process.env.DATABASE_URL || !process.env.DATABASE_URL.startsWith('file:')) {
-  const sqliteUrl = 'file:./dev.db';
+  const sqliteUrl = `file:${dbPath}`;
   process.env.DATABASE_URL = sqliteUrl;
   console.log(`✅ Overriding DATABASE_URL to SQLite: ${sqliteUrl}`);
+} else {
+  // If DATABASE_URL is set but relative, resolve it to absolute path
+  const dbUrl = process.env.DATABASE_URL;
+  if (dbUrl.includes('./') || dbUrl.includes('prisma/dev.db')) {
+    process.env.DATABASE_URL = `file:${dbPath}`;
+    console.log(`✅ Resolved DATABASE_URL to absolute path: ${process.env.DATABASE_URL}`);
+  }
 }
 
 // Validate DATABASE_URL

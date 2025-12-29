@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/table";
 import { Download, BarChart3 } from "lucide-react";
 import { toast } from "sonner";
+import apiClient from "@/lib/api";
+import { exportToCSV } from "@/utils/exportUtils";
 
 interface PurchaseRecord {
   id: string;
@@ -41,14 +43,43 @@ const PurchasesReportTab = () => {
 
   const mockPurchaseData: PurchaseRecord[] = [];
 
-  const handleGenerateReport = () => {
-    setPurchaseData(mockPurchaseData);
-    setIsGenerated(true);
-    toast.success("Purchase report generated successfully");
+  const handleGenerateReport = async () => {
+    if (!fromDate || !toDate) {
+      toast.error("Please select both from and to dates");
+      return;
+    }
+
+    try {
+      const response = await apiClient.getPurchasesReport({
+        from_date: fromDate,
+        to_date: toDate,
+        supplier_id: supplier !== "all" ? supplier : undefined,
+      });
+
+      if (response.data) {
+        setPurchaseData(response.data);
+        setIsGenerated(true);
+        toast.success("Purchase report generated successfully");
+      } else {
+        toast.error(response.error || "Failed to generate report");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to generate report");
+    }
   };
 
   const handleExport = () => {
-    toast.success("Exporting purchase report...");
+    if (purchaseData.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+    const headers = ["Date", "PO Number", "Supplier", "Items", "Amount", "Status"];
+    const success = exportToCSV(purchaseData, headers, `purchases-report-${fromDate}-to-${toDate}.csv`);
+    if (success) {
+      toast.success("Report exported successfully");
+    } else {
+      toast.error("Failed to export report");
+    }
   };
 
   const totalPurchases = purchaseData.reduce((sum, record) => sum + record.amount, 0);

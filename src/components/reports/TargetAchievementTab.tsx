@@ -20,6 +20,10 @@ import {
 } from "@/components/ui/table";
 import { Download, Target, TrendingUp, TrendingDown } from "lucide-react";
 import { toast } from "sonner";
+import apiClient from "@/lib/api";
+import { exportToCSV } from "@/utils/exportUtils";
+import { useEffect } from "react";
+import { Input } from "@/components/ui/input";
 
 interface TargetData {
   category: string;
@@ -31,20 +35,54 @@ interface TargetData {
 
 const TargetAchievementTab = () => {
   const [period, setPeriod] = useState("monthly");
-  const [month, setMonth] = useState("december");
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [targetData, setTargetData] = useState<TargetData[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const targetData: TargetData[] = [];
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const response = await apiClient.getTargetAchievement({
+        period,
+        month,
+      });
+
+      if (response.data) {
+        setTargetData(response.data);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to load data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, [period, month]);
 
   const overallProgress = {
-    target: 0,
-    achieved: 0,
-    percentage: 0,
-    remaining: 0,
+    target: targetData.reduce((sum, t) => sum + t.target, 0),
+    achieved: targetData.reduce((sum, t) => sum + t.achieved, 0),
+    percentage: targetData.reduce((sum, t) => sum + t.target, 0) > 0
+      ? (targetData.reduce((sum, t) => sum + t.achieved, 0) / targetData.reduce((sum, t) => sum + t.target, 0) * 100)
+      : 0,
+    remaining: Math.max(0, targetData.reduce((sum, t) => sum + t.target, 0) - targetData.reduce((sum, t) => sum + t.achieved, 0)),
     daysLeft: 0,
   };
 
   const handleExport = () => {
-    toast.success("Exporting target report...");
+    if (targetData.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+    const headers = ["Category", "Target", "Achieved", "Percentage", "Status"];
+    const success = exportToCSV(targetData, headers, `target-achievement-${period}-${month}.csv`);
+    if (success) {
+      toast.success("Report exported successfully");
+    } else {
+      toast.error("Failed to export report");
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -92,12 +130,15 @@ const TargetAchievementTab = () => {
                 <SelectItem value="yearly">Yearly</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={month} onValueChange={setMonth}>
-              <SelectTrigger className="w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="december">December</SelectItem>
+            <Input 
+              type="month" 
+              value={month} 
+              onChange={(e) => setMonth(e.target.value)}
+              className="w-32"
+            />
+            <Button onClick={fetchData} disabled={loading}>
+              {loading ? "Loading..." : "Apply"}
+            </Button>
                 <SelectItem value="november">November</SelectItem>
                 <SelectItem value="october">October</SelectItem>
               </SelectContent>

@@ -20,6 +20,8 @@ import {
 } from "@/components/ui/table";
 import { Download, Users } from "lucide-react";
 import { toast } from "sonner";
+import apiClient from "@/lib/api";
+import { exportToCSV } from "@/utils/exportUtils";
 
 interface CustomerData {
   id: string;
@@ -40,14 +42,41 @@ const CustomerAnalysisTab = () => {
 
   const mockCustomerData: CustomerData[] = [];
 
-  const handleGenerateReport = () => {
-    setCustomerData(mockCustomerData);
-    setIsGenerated(true);
-    toast.success("Customer analysis report generated");
+  const handleGenerateReport = async () => {
+    if (!fromDate || !toDate) {
+      toast.error("Please select both from and to dates");
+      return;
+    }
+
+    try {
+      const response = await apiClient.getCustomerAnalysis({
+        from_date: fromDate,
+        to_date: toDate,
+        customer_id: customer !== "all" ? customer : undefined,
+      });
+
+      if (response.data) {
+        setCustomerData(response.data);
+        setIsGenerated(true);
+        toast.success("Customer analysis report generated");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to generate report");
+    }
   };
 
   const handleExport = () => {
-    toast.success("Exporting customer report...");
+    if (customerData.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+    const headers = ["Customer", "Contact", "Total Orders", "Total Sales", "Balance Due", "Last Order"];
+    const success = exportToCSV(customerData, headers, `customer-analysis-${fromDate}-to-${toDate}.csv`);
+    if (success) {
+      toast.success("Report exported successfully");
+    } else {
+      toast.error("Failed to export report");
+    }
   };
 
   const totalCustomers = customerData.length;

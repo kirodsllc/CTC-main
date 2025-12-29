@@ -21,6 +21,9 @@ import {
 } from "@/components/ui/table";
 import { Download, TrendingUp, TrendingDown, Minus, BarChart3, Table as TableIcon } from "lucide-react";
 import { toast } from "sonner";
+import apiClient from "@/lib/api";
+import { exportToCSV } from "@/utils/exportUtils";
+import { useEffect } from "react";
 
 interface BrandData {
   brand: string;
@@ -39,22 +42,58 @@ const BrandWiseTab = () => {
   const [brandFilter, setBrandFilter] = useState("all");
   const [viewMode, setViewMode] = useState<"table" | "chart">("table");
 
-  const brandData: BrandData[] = [];
+  const [brandData, setBrandData] = useState<BrandData[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchData = async () => {
+    if (!fromDate || !toDate) {
+      toast.error("Please select both from and to dates");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await apiClient.getBrandWise({
+        from_date: fromDate,
+        to_date: toDate,
+        brand: brandFilter !== "all" ? brandFilter : undefined,
+      });
+
+      if (response.data) {
+        setBrandData(response.data);
+        toast.success("Brand report generated successfully");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to generate report");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const summaryData = {
-    totalBrands: 0,
-    totalSales: 0,
-    totalProfit: 0,
-    avgMargin: 0,
+    totalBrands: brandData.length,
+    totalSales: brandData.reduce((sum, b) => sum + b.totalSales, 0),
+    totalProfit: brandData.reduce((sum, b) => sum + b.profit, 0),
+    avgMargin: brandData.length > 0 
+      ? brandData.reduce((sum, b) => sum + b.margin, 0) / brandData.length
+      : 0,
     stockValue: 0,
   };
 
-  const handleGenerateReport = () => {
-    toast.success("Brand report generated successfully");
-  };
+  const handleGenerateReport = fetchData;
 
   const handleExport = () => {
-    toast.success("Exporting brand report...");
+    if (brandData.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+    const headers = ["Brand", "Avg Sale", "Products", "Total Sales", "Purchases", "Profit", "Margin", "Trend"];
+    const success = exportToCSV(brandData, headers, `brand-wise-${fromDate}-to-${toDate}.csv`);
+    if (success) {
+      toast.success("Report exported successfully");
+    } else {
+      toast.error("Failed to export report");
+    }
   };
 
   const getTrendBadge = (trend: string) => {

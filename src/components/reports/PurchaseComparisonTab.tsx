@@ -2,13 +2,6 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -20,6 +13,10 @@ import {
 import { Download, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Legend } from "recharts";
 import { toast } from "sonner";
+import apiClient from "@/lib/api";
+import { exportToCSV } from "@/utils/exportUtils";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface ComparisonData {
   supplier: string;
@@ -31,10 +28,37 @@ interface ComparisonData {
 }
 
 const PurchaseComparisonTab = () => {
-  const [period1, setPeriod1] = useState("dec-2024");
-  const [period2, setPeriod2] = useState("nov-2024");
+  const [period1Start, setPeriod1Start] = useState("");
+  const [period1End, setPeriod1End] = useState("");
+  const [period2Start, setPeriod2Start] = useState("");
+  const [period2End, setPeriod2End] = useState("");
+  const [comparisonData, setComparisonData] = useState<ComparisonData[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const comparisonData: ComparisonData[] = [];
+  const fetchData = async () => {
+    if (!period1Start || !period1End || !period2Start || !period2End) {
+      toast.error("Please select all period dates");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await apiClient.getPurchaseComparison({
+        period1_start: period1Start,
+        period1_end: period1End,
+        period2_start: period2Start,
+        period2_end: period2End,
+      });
+
+      if (response.data && response.data.comparison) {
+        setComparisonData(response.data.comparison);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to load data");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const chartData = comparisonData.map(d => ({
     name: d.supplier.split(" ")[0],
@@ -43,7 +67,17 @@ const PurchaseComparisonTab = () => {
   }));
 
   const handleExport = () => {
-    toast.success("Exporting comparison report...");
+    if (comparisonData.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+    const headers = ["Supplier", "Current Period", "Previous Period", "Change", "Items", "Avg Delivery"];
+    const success = exportToCSV(comparisonData, headers, `purchase-comparison.csv`);
+    if (success) {
+      toast.success("Report exported successfully");
+    } else {
+      toast.error("Failed to export report");
+    }
   };
 
   const getTrendIcon = (change: number) => {
@@ -69,36 +103,28 @@ const PurchaseComparisonTab = () => {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="space-y-2">
-              <label className="text-sm text-muted-foreground">Current Period</label>
-              <Select value={period1} onValueChange={setPeriod1}>
-                <SelectTrigger className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="dec-2024">December 2024</SelectItem>
-                  <SelectItem value="nov-2024">November 2024</SelectItem>
-                  <SelectItem value="oct-2024">October 2024</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label>Period 1 Start</Label>
+              <Input type="date" value={period1Start} onChange={(e) => setPeriod1Start(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-muted-foreground">Compare With</label>
-              <Select value={period2} onValueChange={setPeriod2}>
-                <SelectTrigger className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="nov-2024">November 2024</SelectItem>
-                  <SelectItem value="oct-2024">October 2024</SelectItem>
-                  <SelectItem value="sep-2024">September 2024</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label>Period 1 End</Label>
+              <Input type="date" value={period1End} onChange={(e) => setPeriod1End(e.target.value)} />
             </div>
-            <div className="flex items-end">
-              <Button>Compare</Button>
+            <div className="space-y-2">
+              <Label>Period 2 Start</Label>
+              <Input type="date" value={period2Start} onChange={(e) => setPeriod2Start(e.target.value)} />
             </div>
+            <div className="space-y-2">
+              <Label>Period 2 End</Label>
+              <Input type="date" value={period2End} onChange={(e) => setPeriod2End(e.target.value)} />
+            </div>
+          </div>
+          <div className="mt-4">
+            <Button onClick={fetchData} disabled={loading}>
+              {loading ? "Loading..." : "Compare"}
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -182,7 +208,20 @@ const PurchaseComparisonTab = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {comparisonData.map((row) => (
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8">
+                    <p className="text-muted-foreground">Loading data...</p>
+                  </TableCell>
+                </TableRow>
+              ) : comparisonData.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8">
+                    <p className="text-muted-foreground">No data available. Select periods and click Compare.</p>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                comparisonData.map((row) => (
                 <TableRow key={row.supplier}>
                   <TableCell className="font-medium">{row.supplier}</TableCell>
                   <TableCell className="text-right">Rs {row.currentPeriod.toLocaleString()}</TableCell>
@@ -198,7 +237,8 @@ const PurchaseComparisonTab = () => {
                   <TableCell className="text-center">{row.items}</TableCell>
                   <TableCell className="text-center">{row.avgDelivery} days</TableCell>
                 </TableRow>
-              ))}
+              ))
+              )}
             </TableBody>
           </Table>
         </CardContent>

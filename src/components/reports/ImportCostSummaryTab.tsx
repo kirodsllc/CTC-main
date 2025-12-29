@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/table";
 import { Download, Truck, DollarSign, Percent, Package } from "lucide-react";
 import { toast } from "sonner";
+import apiClient from "@/lib/api";
+import { exportToCSV } from "@/utils/exportUtils";
 
 interface ImportRecord {
   id: string;
@@ -50,14 +52,41 @@ const ImportCostSummaryTab = () => {
     { id: "4", date: "2024-12-05", lcNumber: "LC-2024-0086", supplier: "NGK Japan", country: "Japan", fobValue: 320000, freight: 22000, insurance: 3200, duties: 48000, totalCost: 393200, items: 200 },
   ];
 
-  const handleGenerateReport = () => {
-    setImportData(mockImportData);
-    setIsGenerated(true);
-    toast.success("Import cost report generated");
+  const handleGenerateReport = async () => {
+    if (!fromDate || !toDate) {
+      toast.error("Please select both from and to dates");
+      return;
+    }
+
+    try {
+      const response = await apiClient.getImportCostSummary({
+        from_date: fromDate,
+        to_date: toDate,
+        country: country !== "all" ? country : undefined,
+      });
+
+      if (response.data && response.data.records) {
+        setImportData(response.data.records);
+        setIsGenerated(true);
+        toast.success("Import cost report generated");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to generate report");
+    }
   };
 
   const handleExport = () => {
-    toast.success("Exporting import cost report...");
+    if (importData.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+    const headers = ["Date", "LC Number", "Supplier", "Country", "FOB Value", "Freight", "Insurance", "Duties", "Total Cost", "Items"];
+    const success = exportToCSV(importData, headers, `import-cost-${fromDate}-to-${toDate}.csv`);
+    if (success) {
+      toast.success("Report exported successfully");
+    } else {
+      toast.error("Failed to export report");
+    }
   };
 
   const totalFOB = importData.reduce((sum, r) => sum + r.fobValue, 0);

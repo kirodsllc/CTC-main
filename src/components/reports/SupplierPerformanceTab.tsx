@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/table";
 import { Download, Star, TrendingUp, TrendingDown, Minus, Clock, Package, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
+import apiClient from "@/lib/api";
+import { exportToCSV } from "@/utils/exportUtils";
 
 interface SupplierData {
   id: string;
@@ -40,21 +42,59 @@ const SupplierPerformanceTab = () => {
   const [toDate, setToDate] = useState("");
   const [supplier, setSupplier] = useState("all");
 
-  const supplierData: SupplierData[] = [];
+  const [supplierData, setSupplierData] = useState<SupplierData[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchData = async () => {
+    if (!fromDate || !toDate) {
+      toast.error("Please select both from and to dates");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await apiClient.getSupplierPerformance({
+        from_date: fromDate,
+        to_date: toDate,
+        supplier_id: supplier !== "all" ? supplier : undefined,
+      });
+
+      if (response.data) {
+        setSupplierData(response.data);
+        toast.success("Supplier performance report generated");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to generate report");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const summaryData = {
-    totalSuppliers: 0,
-    avgOnTime: 0,
-    avgQuality: "0.0",
-    totalPurchases: 0,
+    totalSuppliers: supplierData.length,
+    avgOnTime: supplierData.length > 0
+      ? supplierData.reduce((sum, s) => sum + s.onTimeDelivery, 0) / supplierData.length
+      : 0,
+    avgQuality: supplierData.length > 0
+      ? (supplierData.reduce((sum, s) => sum + s.qualityRating, 0) / supplierData.length).toFixed(1)
+      : "0.0",
+    totalPurchases: supplierData.reduce((sum, s) => sum + s.totalValue, 0),
   };
 
-  const handleGenerateReport = () => {
-    toast.success("Supplier performance report generated");
-  };
+  const handleGenerateReport = fetchData;
 
   const handleExport = () => {
-    toast.success("Exporting supplier report...");
+    if (supplierData.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+    const headers = ["Supplier", "Total Orders", "Total Value", "On-Time Delivery", "Quality Rating", "Avg Delivery Days", "Defect Rate", "Trend"];
+    const success = exportToCSV(supplierData, headers, `supplier-performance-${fromDate}-to-${toDate}.csv`);
+    if (success) {
+      toast.success("Report exported successfully");
+    } else {
+      toast.error("Failed to export report");
+    }
   };
 
   const getTrendIcon = (trend: string) => {

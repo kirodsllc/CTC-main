@@ -20,6 +20,9 @@ import {
 } from "@/components/ui/table";
 import { Download, BarChart3 } from "lucide-react";
 import { toast } from "sonner";
+import apiClient from "@/lib/api";
+import { exportToCSV } from "@/utils/exportUtils";
+import { useEffect } from "react";
 
 interface SalesTypeData {
   type: string;
@@ -45,14 +48,42 @@ const SalesByTypeTab = () => {
     { type: "Retail", transactions: 12, totalAmount: 95000, avgTransaction: 7917, profit: 20900, percentage: 2 },
   ];
 
-  const handleGenerateReport = () => {
-    setSalesData(mockData);
-    setIsGenerated(true);
-    toast.success("Sales by type report generated");
+  const handleGenerateReport = async () => {
+    if (!fromDate || !toDate) {
+      toast.error("Please select both from and to dates");
+      return;
+    }
+
+    try {
+      const response = await apiClient.getSalesByType({
+        from_date: fromDate,
+        to_date: toDate,
+      });
+
+      if (response.data) {
+        setSalesData(response.data);
+        setIsGenerated(true);
+        toast.success("Sales by type report generated");
+      } else {
+        toast.error(response.error || "Failed to generate report");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to generate report");
+    }
   };
 
   const handleExport = () => {
-    toast.success("Exporting report...");
+    if (salesData.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+    const headers = ["Type", "Transactions", "Total Amount", "Avg Transaction", "Profit", "Percentage"];
+    const success = exportToCSV(salesData, headers, `sales-by-type-${fromDate}-to-${toDate}.csv`);
+    if (success) {
+      toast.success("Report exported successfully");
+    } else {
+      toast.error("Failed to export report");
+    }
   };
 
   const summaryCards = [

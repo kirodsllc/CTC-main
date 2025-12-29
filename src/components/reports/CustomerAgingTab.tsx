@@ -19,6 +19,9 @@ import {
 } from "@/components/ui/table";
 import { Download, Clock, AlertTriangle, Send } from "lucide-react";
 import { toast } from "sonner";
+import apiClient from "@/lib/api";
+import { exportToCSV } from "@/utils/exportUtils";
+import { useEffect } from "react";
 
 interface AgingData {
   id: string;
@@ -36,7 +39,30 @@ const CustomerAgingTab = () => {
   const [customerType, setCustomerType] = useState("all");
   const [sortBy, setSortBy] = useState("total");
 
-  const agingData: AgingData[] = [];
+  const [agingData, setAgingData] = useState<AgingData[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const response = await apiClient.getCustomerAging({
+        customer_type: customerType !== "all" ? customerType : undefined,
+        sort_by: sortBy,
+      });
+
+      if (response.data) {
+        setAgingData(response.data);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to load data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, [customerType, sortBy]);
 
   const summaryData = {
     totalOutstanding: agingData.reduce((sum, d) => sum + d.total, 0),
@@ -47,7 +73,17 @@ const CustomerAgingTab = () => {
   };
 
   const handleExport = () => {
-    toast.success("Exporting aging report...");
+    if (agingData.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+    const headers = ["Customer", "Type", "Current", "30-60 Days", "60-90 Days", "90+ Days", "Total"];
+    const success = exportToCSV(agingData, headers, `customer-aging-${customerType}.csv`);
+    if (success) {
+      toast.success("Report exported successfully");
+    } else {
+      toast.error("Failed to export report");
+    }
   };
 
   const handleSendReminder = (customer: string) => {

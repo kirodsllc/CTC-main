@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/table";
 import { Download, DollarSign } from "lucide-react";
 import { toast } from "sonner";
+import apiClient from "@/lib/api";
+import { exportToCSV } from "@/utils/exportUtils";
 
 interface ExpenseRecord {
   id: string;
@@ -47,14 +49,50 @@ const ExpensesReportTab = () => {
     { id: "5", date: "2024-12-22", reference: "EXP-2024-0241", category: "Maintenance", description: "Equipment repair", amount: 15000, status: "approved" },
   ];
 
-  const handleGenerateReport = () => {
-    setExpenseData(mockExpenseData);
-    setIsGenerated(true);
-    toast.success("Expense report generated successfully");
+  const handleGenerateReport = async () => {
+    if (!fromDate || !toDate) {
+      toast.error("Please select both from and to dates");
+      return;
+    }
+
+    try {
+      const response = await apiClient.getExpensesReport({
+        from_date: fromDate,
+        to_date: toDate,
+        category: category !== "all" ? category : undefined,
+      });
+
+      if (response.data) {
+        const formatted = response.data.map((e: any) => ({
+          id: e.id,
+          date: new Date(e.date).toLocaleDateString(),
+          reference: e.id,
+          category: e.expenseType?.name || "N/A",
+          description: e.description || "",
+          amount: e.amount,
+          status: "paid" as const,
+        }));
+        setExpenseData(formatted);
+        setIsGenerated(true);
+        toast.success("Expense report generated successfully");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to generate report");
+    }
   };
 
   const handleExport = () => {
-    toast.success("Exporting expense report...");
+    if (expenseData.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+    const headers = ["Date", "Reference", "Category", "Description", "Amount", "Status"];
+    const success = exportToCSV(expenseData, headers, `expenses-report-${fromDate}-to-${toDate}.csv`);
+    if (success) {
+      toast.success("Report exported successfully");
+    } else {
+      toast.error("Failed to export report");
+    }
   };
 
   const totalExpenses = expenseData.reduce((sum, record) => sum + record.amount, 0);
