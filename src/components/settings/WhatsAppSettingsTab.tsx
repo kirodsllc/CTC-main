@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MessageCircle, Save, Eye, EyeOff, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "@/hooks/use-toast";
+import apiClient from "@/lib/api";
 
 export const WhatsAppSettingsTab = () => {
   const [appKey, setAppKey] = useState("");
@@ -13,18 +14,53 @@ export const WhatsAppSettingsTab = () => {
   const [showAuthKey, setShowAuthKey] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const response = await apiClient.getWhatsAppSettings();
+        if (response.error) {
+          console.error(response.error);
+        } else if (response.data) {
+          setAppKey(response.data.appKey || "");
+          setAuthKey(response.data.authKey || "");
+        }
+      } catch (error: any) {
+        console.error("Failed to fetch WhatsApp settings:", error);
+      }
+    };
+    fetchSettings();
+  }, []);
+
   const handleSave = async () => {
     setIsSaving(true);
     
-    // Simulate save operation
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    toast({
-      title: "Settings Saved",
-      description: "WhatsApp API settings have been saved successfully.",
-    });
-    
-    setIsSaving(false);
+    try {
+      const response = await apiClient.updateWhatsAppSettings({
+        appKey: appKey || undefined,
+        authKey: authKey || undefined,
+      });
+      
+      if (response.error) {
+        toast({
+          title: "Error",
+          description: response.error,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Settings Saved",
+          description: "WhatsApp API settings have been saved successfully.",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to save settings",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (

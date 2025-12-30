@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,10 +36,14 @@ import {
   Download,
   Trash2,
   RotateCcw,
-  Archive
+  Archive,
+  Loader2,
+  RefreshCw
 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import apiClient from "@/lib/api";
 
 interface Backup {
   id: string;
@@ -63,15 +67,12 @@ interface Schedule {
   nextRun: string;
 }
 
-const initialBackups: Backup[] = [];
-
-const initialSchedules: Schedule[] = [];
-
 const allTables = ["parts", "inventory", "sales", "customers", "suppliers", "expenses", "users", "settings"];
 
 export const BackupRestoreTab = () => {
-  const [backups, setBackups] = useState<Backup[]>(initialBackups);
-  const [schedules] = useState<Schedule[]>(initialSchedules);
+  const [backups, setBackups] = useState<Backup[]>([]);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [loading, setLoading] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState<"backups" | "schedules" | "restore">("backups");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
@@ -80,52 +81,144 @@ export const BackupRestoreTab = () => {
     tables: [] as string[],
   });
 
+  const fetchBackups = async () => {
+    try {
+      setLoading(true);
+      const response = await apiClient.getBackups();
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        setBackups(response.data || []);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to fetch backups");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchSchedules = async () => {
+    try {
+      const response = await apiClient.getBackupSchedules();
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        setSchedules(response.data || []);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to fetch schedules");
+    }
+  };
+
+  useEffect(() => {
+    fetchBackups();
+    if (activeSubTab === "schedules") {
+      fetchSchedules();
+    }
+  }, [activeSubTab]);
+
+  // Real-time polling for in-progress backups
+  useEffect(() => {
+    const hasInProgress = backups.some(b => b.status === "in_progress");
+    
+    if (hasInProgress) {
+      const interval = setInterval(async () => {
+        await fetchBackups();
+        
+        // Check if any backup completed
+        const response = await apiClient.getBackups();
+        if (response.data) {
+          const updatedBackups = response.data as Backup[];
+          const completedBackup = updatedBackups.find(
+            b => b.status === "completed" && 
+            backups.find(ob => ob.id === b.id && ob.status === "in_progress")
+          );
+          
+          if (completedBackup) {
+            toast.success(`Backup "${completedBackup.name}" completed successfully!`);
+          }
+        }
+      }, 500); // Poll every 500ms for faster updates
+      
+      return () => clearInterval(interval);
+    }
+  }, [backups]);
+
+  // Calculate storage used from completed backups
+  const calculateStorageUsed = () => {
+    const completedBackups = backups.filter(b => b.status === "completed");
+    const totalBytes = completedBackups.reduce((sum, backup) => {
+      const sizeStr = backup.size || "0 MB";
+      const sizeMatch = sizeStr.match(/(\d+)\s*MB/i);
+      if (sizeMatch) {
+        return sum + parseInt(sizeMatch[1], 10);
+      }
+      return sum;
+    }, 0);
+    return totalBytes > 0 ? `${totalBytes} MB` : "0 MB";
+  };
+
   const stats = {
     total: backups.length,
     successful: backups.filter(b => b.status === "completed").length,
-    storageUsed: "769 MB",
+    storageUsed: calculateStorageUsed(),
     activeSchedules: schedules.filter(s => s.status === "active").length,
   };
 
-  const handleCreateBackup = () => {
+  const handleCreateBackup = async () => {
     if (!formData.name) {
       toast.error("Please enter backup name");
       return;
     }
 
-    const newBackup: Backup = {
-      id: Date.now().toString(),
-      name: formData.name,
-      tables: formData.type === "full" ? "All Tables" : formData.tables.join(", "),
-      type: formData.type,
-      size: "Calculating...",
-      status: "in_progress",
-      createdAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      createdBy: "Admin User",
-    };
-    setBackups([newBackup, ...backups]);
-    toast.success("Backup started");
-    setIsDialogOpen(false);
-    setFormData({ name: "", type: "full", tables: [] });
-
-    // Simulate backup completion
-    setTimeout(() => {
-      setBackups(prev => prev.map(b => 
-        b.id === newBackup.id 
-          ? { ...b, status: "completed" as const, size: `${Math.floor(Math.random() * 100 + 50)} MB` }
-          : b
-      ));
-      toast.success("Backup completed successfully");
-    }, 3000);
+    try {
+      const response = await apiClient.createBackup({
+        name: formData.name,
+        type: formData.type,
+        tables: formData.type === "incremental" ? formData.tables : undefined,
+      });
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        toast.success("Backup started - monitoring progress...");
+        setIsDialogOpen(false);
+        setFormData({ name: "", type: "full", tables: [] });
+        fetchBackups();
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to create backup");
+    }
   };
 
-  const handleRestore = (backup: Backup) => {
-    toast.success(`Restoring from: ${backup.name}`);
+  const handleRestore = async (backup: Backup) => {
+    if (!confirm(`Are you sure you want to restore from ${backup.name}? This will overwrite current data.`)) return;
+    
+    try {
+      const response = await apiClient.restoreBackup(backup.id);
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        toast.success(`Restoring from: ${backup.name}`);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to restore backup");
+    }
   };
 
-  const handleDelete = (id: string) => {
-    setBackups(backups.filter(b => b.id !== id));
-    toast.success("Backup deleted");
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this backup?")) return;
+    
+    try {
+      const response = await apiClient.deleteBackup(id);
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        toast.success("Backup deleted");
+        fetchBackups();
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to delete backup");
+    }
   };
 
   const toggleTable = (table: string) => {
@@ -300,14 +393,43 @@ export const BackupRestoreTab = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {backups.map((backup) => (
-                  <TableRow key={backup.id}>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-8">
+                      <Loader2 className="w-6 h-6 animate-spin mx-auto" />
+                    </TableCell>
+                  </TableRow>
+                ) : backups.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                      No backups found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  backups.map((backup) => (
+                  <TableRow key={backup.id} className={backup.status === "in_progress" ? "bg-amber-50/30" : ""}>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <Archive className="w-4 h-4 text-muted-foreground" />
-                        <div>
+                        {backup.status === "in_progress" ? (
+                          <RefreshCw className="w-4 h-4 text-amber-600 animate-spin" />
+                        ) : (
+                          <Archive className="w-4 h-4 text-muted-foreground" />
+                        )}
+                        <div className="flex-1">
                           <p className="font-medium text-sm">{backup.name}</p>
                           <p className="text-xs text-muted-foreground">{backup.tables}</p>
+                          {backup.status === "in_progress" && (
+                            <div className="mt-1.5 w-48">
+                              <Progress 
+                                value={
+                                  backup.size && backup.size.includes("MB") && backup.size !== "0 MB"
+                                    ? Math.min((parseInt(backup.size.replace(" MB", "")) / 150) * 100, 95)
+                                    : 10
+                                } 
+                                className="h-1.5" 
+                              />
+                            </div>
+                          )}
                         </div>
                       </div>
                     </TableCell>
@@ -316,17 +438,27 @@ export const BackupRestoreTab = () => {
                         {backup.type === "full" ? "Full" : "Incremental"}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-sm">{backup.size}</TableCell>
+                    <TableCell className="text-sm">
+                      {backup.status === "in_progress" ? (
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+                          <span className="font-medium">{backup.size}</span>
+                        </div>
+                      ) : (
+                        backup.size
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Badge 
                         variant="outline" 
                         className={cn(
                           backup.status === "completed" && "bg-emerald-50 text-emerald-700",
                           backup.status === "failed" && "bg-red-50 text-red-700",
-                          backup.status === "in_progress" && "bg-amber-50 text-amber-700"
+                          backup.status === "in_progress" && "bg-amber-50 text-amber-700 flex items-center gap-1.5"
                         )}
                       >
-                        {backup.status}
+                        {backup.status === "in_progress" && <Loader2 className="w-3 h-3 animate-spin" />}
+                        <span className="capitalize">{backup.status.replace("_", " ")}</span>
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{backup.createdAt}</TableCell>
@@ -338,18 +470,29 @@ export const BackupRestoreTab = () => {
                             <Button variant="outline" size="sm" onClick={() => handleRestore(backup)}>
                               Restore
                             </Button>
-                            <Button variant="ghost" size="icon">
+                            <Button variant="ghost" size="icon" title="Download backup">
                               <Download className="w-4 h-4" />
                             </Button>
                           </>
                         )}
-                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDelete(backup.id)}>
+                        {backup.status === "in_progress" && (
+                          <div className="text-xs text-amber-600 font-medium">Processing...</div>
+                        )}
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="text-destructive" 
+                          onClick={() => handleDelete(backup.id)}
+                          disabled={backup.status === "in_progress"}
+                          title="Delete backup"
+                        >
                           <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  ))
+                )}
               </TableBody>
             </Table>
           </CardContent>

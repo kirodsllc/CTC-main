@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,9 +19,11 @@ import {
   Trash2,
   Users,
   Key,
-  Download
+  Download,
+  Loader2
 } from "lucide-react";
 import { toast } from "sonner";
+import apiClient from "@/lib/api";
 
 interface Role {
   id: string;
@@ -40,8 +42,6 @@ const allPermissions = [
   "settings.view", "settings.edit",
 ];
 
-const initialRoles: Role[] = [];
-
 const roleColors = [
   "bg-orange-100 text-orange-600 border-orange-200",
   "bg-emerald-100 text-emerald-600 border-emerald-200",
@@ -52,7 +52,8 @@ const roleColors = [
 ];
 
 export const RolesPermissionsTab = () => {
-  const [roles, setRoles] = useState<Role[]>(initialRoles);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [loading, setLoading] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<Role | null>(null);
   const [formData, setFormData] = useState({ 
@@ -61,35 +62,66 @@ export const RolesPermissionsTab = () => {
     permissions: [] as string[] 
   });
 
-  const handleSubmit = () => {
+  const fetchRoles = async () => {
+    try {
+      setLoading(true);
+      const response = await apiClient.getRoles();
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        setRoles(response.data || []);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to fetch roles");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRoles();
+  }, []);
+
+  const handleSubmit = async () => {
     if (!formData.name) {
       toast.error("Please enter role name");
       return;
     }
 
-    if (editingRole) {
-      setRoles(roles.map(r => r.id === editingRole.id ? { 
-        ...r, 
-        name: formData.name, 
-        description: formData.description,
-        permissions: formData.permissions 
-      } : r));
-      toast.success("Role updated successfully");
-    } else {
-      const newRole: Role = {
-        id: Date.now().toString(),
-        name: formData.name,
-        type: "Custom",
-        description: formData.description,
-        usersCount: 0,
-        permissions: formData.permissions,
-      };
-      setRoles([...roles, newRole]);
-      toast.success("Role created successfully");
+    try {
+      if (editingRole) {
+        const response = await apiClient.updateRole(editingRole.id, {
+          name: formData.name,
+          description: formData.description,
+          permissions: formData.permissions,
+        });
+        if (response.error) {
+          toast.error(response.error);
+        } else {
+          toast.success("Role updated successfully");
+          setIsDialogOpen(false);
+          setEditingRole(null);
+          setFormData({ name: "", description: "", permissions: [] });
+          fetchRoles();
+        }
+      } else {
+        const response = await apiClient.createRole({
+          name: formData.name,
+          description: formData.description,
+          permissions: formData.permissions,
+        });
+        if (response.error) {
+          toast.error(response.error);
+        } else {
+          toast.success("Role created successfully");
+          setIsDialogOpen(false);
+          setFormData({ name: "", description: "", permissions: [] });
+          fetchRoles();
+        }
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to save role");
     }
-    setIsDialogOpen(false);
-    setEditingRole(null);
-    setFormData({ name: "", description: "", permissions: [] });
   };
 
   const handleEdit = (role: Role) => {
@@ -98,9 +130,20 @@ export const RolesPermissionsTab = () => {
     setIsDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    setRoles(roles.filter(r => r.id !== id));
-    toast.success("Role deleted successfully");
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this role?")) return;
+    
+    try {
+      const response = await apiClient.deleteRole(id);
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        toast.success("Role deleted successfully");
+        fetchRoles();
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to delete role");
+    }
   };
 
   const togglePermission = (permission: string) => {
@@ -201,8 +244,18 @@ export const RolesPermissionsTab = () => {
       </div>
 
       {/* Role Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {roles.map((role, index) => (
+      {loading ? (
+        <div className="flex justify-center py-8">
+          <Loader2 className="w-6 h-6 animate-spin" />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {roles.length === 0 ? (
+            <div className="col-span-full text-center py-8 text-muted-foreground">
+              No roles found. Create your first role to get started.
+            </div>
+          ) : (
+            roles.map((role, index) => (
           <Card key={role.id} className="hover:shadow-md transition-shadow">
             <CardContent className="p-4">
               <div className="flex items-start justify-between mb-3">
@@ -237,8 +290,10 @@ export const RolesPermissionsTab = () => {
               </div>
             </CardContent>
           </Card>
-        ))}
-      </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 };

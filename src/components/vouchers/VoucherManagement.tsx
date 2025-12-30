@@ -130,6 +130,34 @@ export const VoucherManagement = () => {
     }
   };
 
+  // Helper function to convert date string to ISO format
+  const convertDateToISO = (dateString: string): string => {
+    if (!dateString) return new Date().toISOString().split('T')[0];
+    
+    // If already in ISO format (YYYY-MM-DD), return as is
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      return dateString;
+    }
+    
+    // If in DD/MM/YYYY format, convert it
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateString)) {
+      const [day, month, year] = dateString.split('/');
+      return `${year}-${month}-${day}`;
+    }
+    
+    // Try to parse as date
+    try {
+      const date = new Date(dateString);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0];
+      }
+    } catch {
+      // If parsing fails, return current date
+    }
+    
+    return new Date().toISOString().split('T')[0];
+  };
+
   const handleSaveVoucher = (data: any) => {
     const typePrefix = {
       receipt: "RV",
@@ -140,6 +168,7 @@ export const VoucherManagement = () => {
     
     let newVoucher: Voucher;
     const voucherNumber = `${typePrefix[data.type as VoucherTab]}${voucherCounters[data.type as VoucherTab]}`;
+    const voucherDate = convertDateToISO(data.date);
     
     if (data.type === "payment") {
       // Convert Payment Voucher data
@@ -163,7 +192,7 @@ export const VoucherManagement = () => {
         id: Date.now().toString(),
         voucherNumber,
         type: "payment",
-        date: data.date || new Date().toISOString().split('T')[0],
+        date: voucherDate,
         narration: data.paidTo || "",
         cashBankAccount: data.crAccount,
         entries,
@@ -194,7 +223,7 @@ export const VoucherManagement = () => {
         id: Date.now().toString(),
         voucherNumber,
         type: "receipt",
-        date: data.date || new Date().toISOString().split('T')[0],
+        date: voucherDate,
         narration: data.receivedFrom || "",
         cashBankAccount: data.drAccount,
         entries,
@@ -224,7 +253,7 @@ export const VoucherManagement = () => {
         id: Date.now().toString(),
         voucherNumber,
         type: "journal",
-        date: data.date || new Date().toISOString().split('T')[0],
+        date: voucherDate,
         narration: data.name || "",
         cashBankAccount: "",
         entries: [...drEntries, ...crEntries],
@@ -254,7 +283,7 @@ export const VoucherManagement = () => {
         id: Date.now().toString(),
         voucherNumber,
         type: "contra",
-        date: data.date || new Date().toISOString().split('T')[0],
+        date: voucherDate,
         narration: data.name || "",
         cashBankAccount: "",
         entries: [...drEntries, ...crEntries],
@@ -269,7 +298,7 @@ export const VoucherManagement = () => {
         id: Date.now().toString(),
         voucherNumber,
         type: data.type,
-        date: data.date || new Date().toISOString().split('T')[0],
+        date: voucherDate,
         narration: data.narration || data.name || data.paidTo || data.receivedFrom || "",
         cashBankAccount: data.cashBankAccount || data.crAccount || data.drAccount || "",
         entries: data.entries || [],

@@ -194,19 +194,22 @@ router.get('/dashboard/recent-activity', async (req: Request, res: Response) => 
   try {
     const limit = parseInt(req.query.limit as string) || 10;
 
-    const [purchases, expenses] = await Promise.all([
-      prisma.directPurchaseOrder.findMany({
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        select: {
-          id: true,
-          dpoNumber: true,
-          date: true,
-          totalAmount: true,
-          createdAt: true,
-        },
-      }),
-      prisma.postedExpense.findMany({
+    const purchases = await prisma.directPurchaseOrder.findMany({
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        dpoNumber: true,
+        date: true,
+        totalAmount: true,
+        createdAt: true,
+      },
+    });
+
+    // Try to get expenses, but handle if table doesn't exist
+    let expenses: any[] = [];
+    try {
+      expenses = await prisma.postedExpense.findMany({
         take: limit,
         orderBy: { createdAt: 'desc' },
         select: {
@@ -216,8 +219,27 @@ router.get('/dashboard/recent-activity', async (req: Request, res: Response) => 
           paidTo: true,
           createdAt: true,
         },
-      }),
-    ]);
+      });
+    } catch (expenseError: any) {
+      // If PostedExpense table doesn't exist, try OperationalExpense
+      try {
+        const operationalExpenses = await prisma.operationalExpense.findMany({
+          take: limit,
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            date: true,
+            amount: true,
+            paidTo: true,
+            createdAt: true,
+          },
+        });
+        expenses = operationalExpenses;
+      } catch (opError) {
+        // If neither table exists, just use empty array
+        console.warn('Expense tables not available:', opError);
+      }
+    }
 
     const activities = [
       ...purchases.map((p) => ({
@@ -804,16 +826,39 @@ router.get('/financial/expenses', async (req: Request, res: Response) => {
       };
     }
 
-    const expenses = await prisma.postedExpense.findMany({
-      where,
-      include: {
-        expenseType: true,
-      },
-      orderBy: { date: 'desc' },
-    });
+    let expenses: any[] = [];
+    try {
+      expenses = await prisma.postedExpense.findMany({
+        where,
+        include: {
+          expenseType: true,
+        },
+        orderBy: { date: 'desc' },
+      });
+    } catch (error: any) {
+      // If PostedExpense table doesn't exist, try OperationalExpense
+      try {
+        const operationalExpenses = await prisma.operationalExpense.findMany({
+          where,
+          orderBy: { date: 'desc' },
+        });
+        // Map OperationalExpense to match PostedExpense structure
+        expenses = operationalExpenses.map((e: any) => ({
+          ...e,
+          expenseType: {
+            name: e.expenseType,
+            category: 'Operational',
+          },
+        }));
+      } catch (opError) {
+        // If neither table exists, return empty array
+        console.warn('Expense tables not available:', opError);
+        return res.json({ data: [] });
+      }
+    }
 
     const filtered = category && category !== 'all'
-      ? expenses.filter(e => e.expenseType.category === category)
+      ? expenses.filter(e => e.expenseType?.category === category)
       : expenses;
 
     res.json({ data: filtered });

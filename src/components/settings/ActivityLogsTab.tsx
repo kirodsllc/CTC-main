@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,8 +37,13 @@ import {
   Edit,
   Trash2,
   Eye,
-  Clock
+  Clock,
+  Loader2,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
+import { toast } from "sonner";
+import apiClient from "@/lib/api";
 
 interface ActivityLog {
   id: string;
@@ -54,7 +59,6 @@ interface ActivityLog {
   details?: Record<string, string>;
 }
 
-const initialLogs: ActivityLog[] = [];
 
 const actionIcons: Record<string, React.ReactNode> = {
   login: <LogIn className="w-4 h-4" />,
@@ -91,22 +95,62 @@ const roleColors: Record<string, string> = {
 };
 
 export const ActivityLogsTab = () => {
-  const [logs] = useState<ActivityLog[]>(initialLogs);
+  const [logs, setLogs] = useState<ActivityLog[]>([]);
+  const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [moduleFilter, setModuleFilter] = useState("all");
   const [actionFilter, setActionFilter] = useState("all");
   const [selectedLog, setSelectedLog] = useState<ActivityLog | null>(null);
+  const [page, setPage] = useState(1);
+  const [limit] = useState(20);
+  const [total, setTotal] = useState(0);
 
-  const filteredLogs = logs.filter(log => {
-    const matchesSearch = log.user.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         log.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesModule = moduleFilter === "all" || log.module === moduleFilter;
-    const matchesAction = actionFilter === "all" || log.actionType === actionFilter;
-    return matchesSearch && matchesModule && matchesAction;
-  });
+  const fetchLogs = async () => {
+    try {
+      setLoading(true);
+      const params: any = {
+        page,
+        limit,
+      };
+      if (searchQuery) params.search = searchQuery;
+      if (moduleFilter !== "all") params.module = moduleFilter;
+      if (actionFilter !== "all") params.actionType = actionFilter;
 
+      const response = await apiClient.getActivityLogs(params);
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        setLogs(response.data || []);
+        if (response.pagination) {
+          setTotal(response.pagination.total);
+        }
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to fetch activity logs");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLogs();
+  }, [page, moduleFilter, actionFilter]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (page === 1) {
+        fetchLogs();
+      } else {
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Calculate stats from current page (for now)
+  // In production, you'd want a dedicated stats endpoint
   const stats = {
-    total: logs.length,
+    total: total,
     success: logs.filter(l => l.status === "success").length,
     warning: logs.filter(l => l.status === "warning").length,
     error: logs.filter(l => l.status === "error").length,
@@ -117,7 +161,7 @@ export const ActivityLogsTab = () => {
   const handleExport = () => {
     const csvContent = [
       ["Timestamp", "User", "Action", "Module", "Description", "IP Address", "Status"],
-      ...filteredLogs.map(log => [
+      ...logs.map(log => [
         log.timestamp, log.user, log.action, log.module, log.description, log.ipAddress, log.status
       ])
     ].map(row => row.join(",")).join("\n");
@@ -236,7 +280,20 @@ export const ActivityLogsTab = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredLogs.map((log) => (
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin mx-auto" />
+                  </TableCell>
+                </TableRow>
+              ) : logs.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                    No activity logs found
+                  </TableCell>
+                </TableRow>
+              ) : (
+                logs.map((log) => (
                 <TableRow key={log.id}>
                   <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                     <div className="flex items-center gap-1">
@@ -281,11 +338,41 @@ export const ActivityLogsTab = () => {
                     )}
                   </TableCell>
                 </TableRow>
-              ))}
+              )))}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      {/* Pagination */}
+      {total > 0 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            Showing {(page - 1) * limit + 1} to {Math.min(page * limit, total)} of {total} logs
+          </span>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1 || loading}
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Previous
+            </Button>
+            <span className="px-3">Page {page} of {Math.ceil(total / limit)}</span>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setPage(p => Math.min(Math.ceil(total / limit), p + 1))}
+              disabled={page >= Math.ceil(total / limit) || loading}
+            >
+              Next
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Details Dialog */}
       <Dialog open={!!selectedLog} onOpenChange={() => setSelectedLog(null)}>

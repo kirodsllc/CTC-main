@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import apiClient from "@/lib/api";
 
 type SubTab = "company" | "system" | "invoice" | "notifications";
 
@@ -121,8 +122,42 @@ export const CompanyProfileTab = () => {
     { id: "notifications" as const, label: "Notifications", icon: Bell },
   ];
 
-  const handleSave = () => {
-    toast.success("Settings saved successfully");
+  useEffect(() => {
+    const fetchCompanyProfile = async () => {
+      try {
+        const response = await apiClient.getCompanyProfile();
+        if (response.error) {
+          console.error(response.error);
+        } else if (response.data) {
+          const data = response.data;
+          if (data.companyInfo) setCompanyInfo(data.companyInfo);
+          if (data.systemSettings) setSystemSettings(data.systemSettings);
+          if (data.invoiceSettings) setInvoiceSettings(data.invoiceSettings);
+          if (data.notificationSettings) setNotificationSettings(data.notificationSettings);
+        }
+      } catch (error: any) {
+        console.error("Failed to fetch company profile:", error);
+      }
+    };
+    fetchCompanyProfile();
+  }, []);
+
+  const handleSave = async () => {
+    try {
+      const response = await apiClient.updateCompanyProfile({
+        companyInfo,
+        systemSettings,
+        invoiceSettings,
+        notificationSettings,
+      });
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        toast.success("Settings saved successfully");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to save settings");
+    }
   };
 
   return (

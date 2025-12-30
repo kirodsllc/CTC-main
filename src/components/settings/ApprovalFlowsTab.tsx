@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,10 +25,12 @@ import {
   Edit,
   Volume2,
   ChevronRight,
-  ClipboardCheck
+  ClipboardCheck,
+  Loader2
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import apiClient from "@/lib/api";
 
 interface ApprovalStep {
   role: string;
@@ -46,8 +48,6 @@ interface ApprovalFlow {
   condition: string;
 }
 
-const initialFlows: ApprovalFlow[] = [];
-
 interface PendingApproval {
   id: string;
   type: string;
@@ -57,10 +57,10 @@ interface PendingApproval {
   amount?: number;
 }
 
-const pendingApprovals: PendingApproval[] = [];
-
 export const ApprovalFlowsTab = () => {
-  const [flows, setFlows] = useState<ApprovalFlow[]>(initialFlows);
+  const [flows, setFlows] = useState<ApprovalFlow[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
+  const [loading, setLoading] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState<"flows" | "pending">("flows");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
@@ -72,33 +72,76 @@ export const ApprovalFlowsTab = () => {
     steps: [{ role: "manager", action: "approve" }] as ApprovalStep[],
   });
 
-  const handleSubmit = () => {
+  const fetchFlows = async () => {
+    try {
+      setLoading(true);
+      const response = await apiClient.getApprovalFlows();
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        setFlows(response.data || []);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to fetch approval flows");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchPendingApprovals = async () => {
+    try {
+      const response = await apiClient.getPendingApprovals();
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        setPendingApprovals(response.data || []);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to fetch pending approvals");
+    }
+  };
+
+  useEffect(() => {
+    fetchFlows();
+    if (activeSubTab === "pending") {
+      fetchPendingApprovals();
+    }
+  }, [activeSubTab]);
+
+  const handleSubmit = async () => {
     if (!formData.name || !formData.module) {
       toast.error("Please fill required fields");
       return;
     }
 
-    const newFlow: ApprovalFlow = {
-      id: Date.now().toString(),
-      name: formData.name,
-      status: "active",
-      description: formData.description,
-      steps: formData.steps,
-      module: formData.module,
-      trigger: formData.trigger,
-      condition: formData.condition,
-    };
-    setFlows([...flows, newFlow]);
-    toast.success("Approval flow created successfully");
-    setIsDialogOpen(false);
-    setFormData({
-      name: "",
-      description: "",
-      module: "",
-      trigger: "On Create",
-      condition: "",
-      steps: [{ role: "manager", action: "approve" }],
-    });
+    try {
+      const response = await apiClient.createApprovalFlow({
+        name: formData.name,
+        description: formData.description,
+        module: formData.module,
+        trigger: formData.trigger,
+        condition: formData.condition,
+        steps: formData.steps,
+        status: "active",
+      });
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        toast.success("Approval flow created successfully");
+        setIsDialogOpen(false);
+        setFormData({
+          name: "",
+          description: "",
+          module: "",
+          trigger: "On Create",
+          condition: "",
+          steps: [{ role: "manager", action: "approve" }],
+        });
+        fetchFlows();
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to create approval flow");
+    }
   };
 
   const addStep = () => {
@@ -271,8 +314,18 @@ export const ApprovalFlowsTab = () => {
 
       {/* Content */}
       {activeSubTab === "flows" ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {flows.map((flow) => (
+        loading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {flows.length === 0 ? (
+              <div className="col-span-full text-center py-8 text-muted-foreground">
+                No approval flows found. Create your first flow to get started.
+              </div>
+            ) : (
+              flows.map((flow) => (
             <Card key={flow.id} className="hover:shadow-md transition-shadow">
               <CardContent className="p-4">
                 <div className="flex items-start justify-between mb-2">
@@ -321,8 +374,10 @@ export const ApprovalFlowsTab = () => {
                 </div>
               </CardContent>
             </Card>
-          ))}
-        </div>
+              ))
+            )}
+          </div>
+        )
       ) : (
         <Card>
           <CardContent className="p-0">

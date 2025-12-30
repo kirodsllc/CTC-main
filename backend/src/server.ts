@@ -10,6 +10,13 @@ import financialRoutes from './routes/financial';
 import customersRoutes from './routes/customers';
 import suppliersRoutes from './routes/suppliers';
 import reportsRoutes from './routes/reports';
+import usersRoutes from './routes/users';
+import rolesRoutes from './routes/roles';
+import activityLogsRoutes from './routes/activity-logs';
+import approvalFlowsRoutes from './routes/approval-flows';
+import backupsRoutes from './routes/backups';
+import companyProfileRoutes from './routes/company-profile';
+import whatsappSettingsRoutes from './routes/whatsapp-settings';
 
 dotenv.config();
 
@@ -59,6 +66,13 @@ app.use('/api/financial', financialRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/suppliers', suppliersRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/users', usersRoutes);
+app.use('/api/roles', rolesRoutes);
+app.use('/api/activity-logs', activityLogsRoutes);
+app.use('/api/approval-flows', approvalFlowsRoutes);
+app.use('/api/backups', backupsRoutes);
+app.use('/api/company-profile', companyProfileRoutes);
+app.use('/api/whatsapp-settings', whatsappSettingsRoutes);
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,9 +38,11 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
-  Download
+  Download,
+  Loader2
 } from "lucide-react";
 import { toast } from "sonner";
+import apiClient from "@/lib/api";
 
 interface User {
   id: string;
@@ -52,8 +54,6 @@ interface User {
   createdAt: string;
 }
 
-const initialUsers: User[] = [];
-
 const roleColors: Record<string, string> = {
   Admin: "bg-violet-100 text-violet-700 border-violet-200",
   Manager: "bg-blue-100 text-blue-700 border-blue-200",
@@ -63,24 +63,65 @@ const roleColors: Record<string, string> = {
 };
 
 export const UsersManagementTab = () => {
-  const [users, setUsers] = useState<User[]>(initialUsers);
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [formData, setFormData] = useState<{ name: string; email: string; role: string; status: "active" | "inactive" }>({ name: "", email: "", role: "Staff", status: "active" });
+  const [formData, setFormData] = useState<{ name: string; email: string; role: string; status: "active" | "inactive"; password?: string }>({ name: "", email: "", role: "Staff", status: "active" });
+  const [page, setPage] = useState(1);
+  const [limit] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
-  const filteredUsers = users.filter(user => {
-    const matchesSearch = user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         user.email.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesRole = roleFilter === "all" || user.role === roleFilter;
-    const matchesStatus = statusFilter === "all" || user.status === statusFilter;
-    return matchesSearch && matchesRole && matchesStatus;
-  });
+  const fetchUsers = async () => {
+    try {
+      setLoading(true);
+      const params: any = {
+        page,
+        limit,
+      };
+      if (searchQuery) params.search = searchQuery;
+      if (roleFilter !== "all") params.role = roleFilter;
+      if (statusFilter !== "all") params.status = statusFilter;
+
+      const response = await apiClient.getUsers(params);
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        setUsers(response.data || []);
+        if (response.pagination) {
+          setTotal(response.pagination.total);
+          setTotalPages(response.pagination.totalPages);
+        }
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to fetch users");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, [page, searchQuery, roleFilter, statusFilter]);
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (page === 1) {
+        fetchUsers();
+      } else {
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const stats = {
-    total: users.length,
+    total: total,
     active: users.filter(u => u.status === "active").length,
     admins: users.filter(u => u.role === "Admin").length,
     inactive: users.filter(u => u.status === "inactive").length,
@@ -89,7 +130,7 @@ export const UsersManagementTab = () => {
   const handleExportCSV = () => {
     const csvContent = [
       ["Name", "Email", "Role", "Status", "Last Login", "Created At"],
-      ...filteredUsers.map(user => [
+      ...users.map(user => [
         user.name, user.email, user.role, user.status, user.lastLogin, user.createdAt
       ])
     ].map(row => row.join(",")).join("\n");
@@ -104,29 +145,54 @@ export const UsersManagementTab = () => {
     toast.success("Users exported successfully");
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!formData.name || !formData.email) {
       toast.error("Please fill all required fields");
       return;
     }
 
-    if (editingUser) {
-      setUsers(users.map(u => u.id === editingUser.id ? { ...u, ...formData } : u));
-      toast.success("User updated successfully");
-    } else {
-      const newUser: User = {
-        id: Date.now().toString(),
-        ...formData,
-        status: formData.status as "active" | "inactive",
-        lastLogin: "-",
-        createdAt: new Date().toISOString().split('T')[0],
-      };
-      setUsers([...users, newUser]);
-      toast.success("User added successfully");
+    try {
+      if (editingUser) {
+        const response = await apiClient.updateUser(editingUser.id, {
+          name: formData.name,
+          email: formData.email,
+          role: formData.role,
+          status: formData.status,
+          ...(formData.password && { password: formData.password }),
+        });
+        if (response.error) {
+          toast.error(response.error);
+        } else {
+          toast.success("User updated successfully");
+          setIsDialogOpen(false);
+          setEditingUser(null);
+          setFormData({ name: "", email: "", role: "Staff", status: "active" });
+          fetchUsers();
+        }
+      } else {
+        if (!formData.password) {
+          toast.error("Password is required for new users");
+          return;
+        }
+        const response = await apiClient.createUser({
+          name: formData.name,
+          email: formData.email,
+          role: formData.role,
+          status: formData.status,
+          password: formData.password,
+        });
+        if (response.error) {
+          toast.error(response.error);
+        } else {
+          toast.success("User added successfully");
+          setIsDialogOpen(false);
+          setFormData({ name: "", email: "", role: "Staff", status: "active", password: "" });
+          fetchUsers();
+        }
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to save user");
     }
-    setIsDialogOpen(false);
-    setEditingUser(null);
-    setFormData({ name: "", email: "", role: "Staff", status: "active" });
   };
 
   const handleEdit = (user: User) => {
@@ -135,9 +201,20 @@ export const UsersManagementTab = () => {
     setIsDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    setUsers(users.filter(u => u.id !== id));
-    toast.success("User deleted successfully");
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this user?")) return;
+    
+    try {
+      const response = await apiClient.deleteUser(id);
+      if (response.error) {
+        toast.error(response.error);
+      } else {
+        toast.success("User deleted successfully");
+        fetchUsers();
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to delete user");
+    }
   };
 
   const getInitials = (name: string) => {
@@ -258,6 +335,30 @@ export const UsersManagementTab = () => {
                   placeholder="Enter email"
                 />
               </div>
+              {!editingUser && (
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password *</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={formData.password || ""}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    placeholder="Enter password"
+                  />
+                </div>
+              )}
+              {editingUser && (
+                <div className="space-y-2">
+                  <Label htmlFor="password">New Password (leave blank to keep current)</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={formData.password || ""}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    placeholder="Enter new password"
+                  />
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Role</Label>
@@ -312,7 +413,20 @@ export const UsersManagementTab = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredUsers.map((user) => (
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin mx-auto" />
+                  </TableCell>
+                </TableRow>
+              ) : users.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                    No users found
+                  </TableCell>
+                </TableRow>
+              ) : (
+                users.map((user) => (
                 <TableRow key={user.id}>
                   <TableCell>
                     <div className="flex items-center gap-3">
@@ -351,7 +465,7 @@ export const UsersManagementTab = () => {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
+              )))}
             </TableBody>
           </Table>
         </CardContent>
@@ -359,14 +473,26 @@ export const UsersManagementTab = () => {
 
       {/* Pagination */}
       <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>Showing 1 to {filteredUsers.length} of {filteredUsers.length} users</span>
+        <span>
+          Showing {(page - 1) * limit + 1} to {Math.min(page * limit, total)} of {total} users
+        </span>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={page === 1 || loading}
+          >
             <ChevronLeft className="w-4 h-4" />
             Previous
           </Button>
-          <span className="px-3">Page 1 of 1</span>
-          <Button variant="outline" size="sm" disabled>
+          <span className="px-3">Page {page} of {totalPages}</span>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages || loading}
+          >
             Next
             <ChevronRight className="w-4 h-4" />
           </Button>

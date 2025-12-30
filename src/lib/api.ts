@@ -1399,6 +1399,233 @@ class ApiClient {
     const queryString = queryParams.toString();
     return this.request(`/reports/analytics/supplier-performance${queryString ? `?${queryString}` : ''}`);
   }
+
+  // Users Management API
+  async getUsers(params?: {
+    search?: string;
+    role?: string;
+    status?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const queryParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          queryParams.append(key, String(value));
+        }
+      });
+    }
+    const queryString = queryParams.toString();
+    return this.request(`/users${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getUser(id: string) {
+    return this.request(`/users/${id}`);
+  }
+
+  async createUser(data: {
+    name: string;
+    email: string;
+    role: string;
+    status: "active" | "inactive";
+    password?: string;
+  }) {
+    return this.request('/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateUser(id: string, data: {
+    name?: string;
+    email?: string;
+    role?: string;
+    status?: "active" | "inactive";
+    password?: string;
+  }) {
+    return this.request(`/users/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteUser(id: string) {
+    return this.request(`/users/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Roles & Permissions API
+  async getRoles() {
+    return this.request('/roles');
+  }
+
+  async getRole(id: string) {
+    return this.request(`/roles/${id}`);
+  }
+
+  async createRole(data: {
+    name: string;
+    description?: string;
+    permissions: string[];
+  }) {
+    return this.request('/roles', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateRole(id: string, data: {
+    name?: string;
+    description?: string;
+    permissions?: string[];
+  }) {
+    return this.request(`/roles/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteRole(id: string) {
+    return this.request(`/roles/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Activity Logs API
+  async getActivityLogs(params?: {
+    search?: string;
+    module?: string;
+    actionType?: string;
+    page?: number;
+    limit?: number;
+    fromDate?: string;
+    toDate?: string;
+  }) {
+    const queryParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          queryParams.append(key, String(value));
+        }
+      });
+    }
+    const queryString = queryParams.toString();
+    return this.request(`/activity-logs${queryString ? `?${queryString}` : ''}`);
+  }
+
+  // Approval Flows API
+  async getApprovalFlows() {
+    return this.request('/approval-flows');
+  }
+
+  async getApprovalFlow(id: string) {
+    return this.request(`/approval-flows/${id}`);
+  }
+
+  async createApprovalFlow(data: {
+    name: string;
+    description?: string;
+    module: string;
+    trigger: string;
+    condition?: string;
+    steps: Array<{ role: string; action: string }>;
+    status?: "active" | "inactive";
+  }) {
+    return this.request('/approval-flows', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateApprovalFlow(id: string, data: {
+    name?: string;
+    description?: string;
+    module?: string;
+    trigger?: string;
+    condition?: string;
+    steps?: Array<{ role: string; action: string }>;
+    status?: "active" | "inactive";
+  }) {
+    return this.request(`/approval-flows/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteApprovalFlow(id: string) {
+    return this.request(`/approval-flows/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getPendingApprovals() {
+    return this.request('/approval-flows/pending');
+  }
+
+  // Backup & Restore API
+  async getBackups() {
+    return this.request('/backups');
+  }
+
+  async getBackup(id: string) {
+    return this.request(`/backups/${id}`);
+  }
+
+  async createBackup(data: {
+    name: string;
+    type: "full" | "incremental";
+    tables?: string[];
+  }) {
+    return this.request('/backups', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async restoreBackup(id: string) {
+    return this.request(`/backups/${id}/restore`, {
+      method: 'POST',
+    });
+  }
+
+  async deleteBackup(id: string) {
+    return this.request(`/backups/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getBackupSchedules() {
+    return this.request('/backups/schedules');
+  }
+
+  // Company Profile API
+  async getCompanyProfile() {
+    return this.request('/company-profile');
+  }
+
+  async updateCompanyProfile(data: any) {
+    return this.request('/company-profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // WhatsApp Settings API
+  async getWhatsAppSettings() {
+    return this.request('/whatsapp-settings');
+  }
+
+  async updateWhatsAppSettings(data: {
+    appKey?: string;
+    authKey?: string;
+  }) {
+    return this.request('/whatsapp-settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

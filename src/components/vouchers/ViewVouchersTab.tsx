@@ -38,7 +38,6 @@ import {
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { useToast } from "@/hooks/use-toast";
 import { Voucher } from "./VoucherManagement";
-import { VoucherPrintView } from "./VoucherPrintView";
 
 interface ViewVouchersTabProps {
   vouchers: Voucher[];
@@ -99,8 +98,289 @@ export const ViewVouchersTab = ({
   const [editNarration, setEditNarration] = useState("");
   const [editDate, setEditDate] = useState("");
   
-  // Print dialog
-  const [printingVoucher, setPrintingVoucher] = useState<Voucher | null>(null);
+  // Print function - opens print dialog directly
+  const handlePrint = (voucher: Voucher) => {
+    const getVoucherTypeName = (type: Voucher["type"]) => {
+      const names = {
+        receipt: "Receipt Voucher",
+        payment: "Payment Voucher",
+        journal: "Journal Voucher",
+        contra: "Contra Voucher",
+      };
+      return names[type];
+    };
+
+    const numberToWords = (num: number): string => {
+      const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+        "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+      const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+      
+      if (num === 0) return "Zero";
+      
+      const convertLessThanThousand = (n: number): string => {
+        if (n === 0) return "";
+        if (n < 20) return ones[n];
+        if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 !== 0 ? " " + ones[n % 10] : "");
+        return ones[Math.floor(n / 100)] + " Hundred" + (n % 100 !== 0 ? " " + convertLessThanThousand(n % 100) : "");
+      };
+
+      const wholePart = Math.floor(num);
+      
+      if (wholePart >= 10000000) {
+        const crore = Math.floor(wholePart / 10000000);
+        const remainder = wholePart % 10000000;
+        return convertLessThanThousand(crore) + " Crore" + (remainder > 0 ? " " + numberToWords(remainder) : "");
+      }
+      if (wholePart >= 100000) {
+        const lakh = Math.floor(wholePart / 100000);
+        const remainder = wholePart % 100000;
+        return convertLessThanThousand(lakh) + " Lakh" + (remainder > 0 ? " " + numberToWords(remainder) : "");
+      }
+      if (wholePart >= 1000) {
+        const thousand = Math.floor(wholePart / 1000);
+        const remainder = wholePart % 1000;
+        return convertLessThanThousand(thousand) + " Thousand" + (remainder > 0 ? " " + convertLessThanThousand(remainder) : "");
+      }
+      
+      return convertLessThanThousand(wholePart);
+    };
+
+    const formatDate = (dateString: string) => {
+      try {
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return dateString;
+        return date.toLocaleDateString("en-GB");
+      } catch {
+        return dateString;
+      }
+    };
+
+    // Get account label from accounts list
+    const getAccountLabel = (accountValue: string) => {
+      const account = accounts.find(acc => acc.value === accountValue);
+      return account ? account.label : accountValue;
+    };
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const printContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Print Voucher - ${voucher.voucherNumber}</title>
+  <style>
+    @media print {
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+      }
+    }
+    body {
+      font-family: Arial, sans-serif;
+      padding: 32px;
+      background: white;
+      color: black;
+      min-height: 297mm;
+    }
+    .header {
+      border-bottom: 2px solid black;
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    .header h1 {
+      font-size: 24px;
+      font-weight: bold;
+      margin: 0 0 8px 0;
+    }
+    .header p {
+      font-size: 14px;
+      margin: 4px 0;
+    }
+    .voucher-title {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .voucher-title h2 {
+      font-size: 20px;
+      font-weight: bold;
+      border: 2px solid black;
+      display: inline-block;
+      padding: 8px 32px;
+      margin: 0;
+    }
+    .voucher-info {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .voucher-info p {
+      margin: 8px 0;
+    }
+    .voucher-info .right {
+      text-align: right;
+    }
+    .narration {
+      margin-bottom: 24px;
+      padding: 12px;
+      background: #f5f5f5;
+      border: 1px solid #e0e0e0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid black;
+      margin-bottom: 24px;
+    }
+    th, td {
+      border: 1px solid black;
+      padding: 8px;
+      text-align: left;
+    }
+    th {
+      background: #f0f0f0;
+    }
+    .text-right {
+      text-align: right;
+    }
+    tfoot tr {
+      background: #f0f0f0;
+      font-weight: bold;
+    }
+    .amount-words {
+      margin-bottom: 32px;
+      padding: 12px;
+      border: 1px solid black;
+    }
+    .amount-words p {
+      margin: 4px 0;
+    }
+    .signatures {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 32px;
+      margin-top: 64px;
+      padding-top: 16px;
+    }
+    .signature {
+      text-align: center;
+      border-top: 1px solid black;
+      padding-top: 8px;
+    }
+    .signature p {
+      font-weight: bold;
+      margin: 0;
+    }
+    .footer {
+      margin-top: 48px;
+      text-align: center;
+      font-size: 12px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Your Company Name</h1>
+    <p>123 Business Street, City, Country</p>
+    <p>Phone: +92-XXX-XXXXXXX | Email: info@company.com</p>
+  </div>
+
+  <div class="voucher-title">
+    <h2>${getVoucherTypeName(voucher.type).toUpperCase()}</h2>
+  </div>
+
+  <div class="voucher-info">
+    <div>
+      <p><strong>Voucher No:</strong> ${voucher.voucherNumber}</p>
+      <p><strong>Account:</strong> ${getAccountLabel(voucher.cashBankAccount) || voucher.cashBankAccount}</p>
+      ${voucher.chequeNumber ? `<p><strong>Cheque No:</strong> ${voucher.chequeNumber}</p>` : ''}
+    </div>
+    <div class="right">
+      <p><strong>Date:</strong> ${formatDate(voucher.date)}</p>
+      <p><strong>Status:</strong> ${voucher.status.charAt(0).toUpperCase() + voucher.status.slice(1)}</p>
+      ${voucher.chequeDate ? `<p><strong>Cheque Date:</strong> ${formatDate(voucher.chequeDate)}</p>` : ''}
+    </div>
+  </div>
+
+  ${voucher.narration ? `
+  <div class="narration">
+    <p><strong>Narration:</strong> ${voucher.narration}</p>
+  </div>
+  ` : ''}
+
+  <table>
+    <thead>
+      <tr>
+        <th>S.No</th>
+        <th>Account</th>
+        <th>Description</th>
+        <th class="text-right">Debit (Rs)</th>
+        <th class="text-right">Credit (Rs)</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${voucher.entries.map((entry, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${getAccountLabel(entry.account) || entry.account}</td>
+        <td>${entry.description || "-"}</td>
+        <td class="text-right">${entry.debit > 0 ? entry.debit.toLocaleString("en-PK", { minimumFractionDigits: 2 }) : "-"}</td>
+        <td class="text-right">${entry.credit > 0 ? entry.credit.toLocaleString("en-PK", { minimumFractionDigits: 2 }) : "-"}</td>
+      </tr>
+      `).join('')}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="3" class="text-right"><strong>Total:</strong></td>
+        <td class="text-right"><strong>${voucher.totalDebit.toLocaleString("en-PK", { minimumFractionDigits: 2 })}</strong></td>
+        <td class="text-right"><strong>${voucher.totalCredit.toLocaleString("en-PK", { minimumFractionDigits: 2 })}</strong></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="amount-words">
+    <p><strong>Amount in Words:</strong></p>
+    <p style="font-style: italic;">${numberToWords(voucher.totalDebit)} Rupees Only</p>
+  </div>
+
+  <div class="signatures">
+    <div class="signature">
+      <p>Prepared By</p>
+    </div>
+    <div class="signature">
+      <p>Checked By</p>
+    </div>
+    <div class="signature">
+      <p>Approved By</p>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p>This is a computer generated document. Printed on ${new Date().toLocaleString()}</p>
+  </div>
+
+  <script>
+    window.onload = function() {
+      window.print();
+      window.onafterprint = function() {
+        window.close();
+      };
+    };
+  </script>
+</body>
+</html>
+    `;
+
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+  };
 
   // Filter vouchers
   const filteredVouchers = vouchers.filter((voucher) => {
@@ -585,7 +865,7 @@ export const ViewVouchersTab = ({
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => setPrintingVoucher(voucher)}>
+                            <DropdownMenuItem onClick={() => handlePrint(voucher)}>
                               <Printer className="h-4 w-4 mr-2" />
                               Print
                             </DropdownMenuItem>
@@ -869,15 +1149,6 @@ export const ViewVouchersTab = ({
         </DialogContent>
       </Dialog>
 
-      {/* Print Dialog */}
-      <Dialog open={!!printingVoucher} onOpenChange={() => setPrintingVoucher(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Print Voucher</DialogTitle>
-          </DialogHeader>
-          {printingVoucher && <VoucherPrintView voucher={printingVoucher} />}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

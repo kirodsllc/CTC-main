@@ -139,11 +139,6 @@ const TargetAchievementTab = () => {
             <Button onClick={fetchData} disabled={loading}>
               {loading ? "Loading..." : "Apply"}
             </Button>
-                <SelectItem value="november">November</SelectItem>
-                <SelectItem value="october">October</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button>Apply</Button>
           </div>
         </CardContent>
       </Card>
