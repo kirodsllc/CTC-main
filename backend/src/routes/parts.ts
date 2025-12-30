@@ -506,6 +506,217 @@ router.post('/', async (req: Request, res: Response) => {
       brandId = brand.id;
     }
 
+    // Helper function to check if string looks like a UUID
+    const isUUID = (str: string) => {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      return uuidRegex.test(str);
+    };
+
+    // Validate and handle category (auto-create if not found)
+    let validatedCategoryId = null;
+    if (category_id && String(category_id).trim() !== '') {
+      try {
+        const categoryIdStr = String(category_id).trim();
+        let category = null;
+        
+        if (isUUID(categoryIdStr)) {
+          category = await prisma.category.findUnique({
+            where: { id: categoryIdStr },
+          });
+          console.log(`[POST] Category lookup by ID: ${category ? 'found' : 'not found'}`);
+        }
+        
+        if (!category) {
+          category = await prisma.category.findUnique({
+            where: { name: categoryIdStr },
+          });
+          console.log(`[POST] Category lookup by name: ${category ? 'found' : 'not found'}`);
+        }
+        
+        // If not found, auto-create it
+        if (!category) {
+          console.log(`[POST] Attempting to auto-create category: "${categoryIdStr}"`);
+          try {
+            category = await prisma.category.create({
+              data: {
+                name: categoryIdStr,
+                status: 'active',
+              },
+            });
+            console.log(`[POST] Category auto-created: ${category.name} (ID: ${category.id})`);
+          } catch (createError: any) {
+            console.error(`[POST] Error auto-creating category: ${createError.message}`);
+            // If creation fails (e.g., unique constraint), try to find it again
+            category = await prisma.category.findUnique({
+              where: { name: categoryIdStr },
+            });
+            if (category) {
+              console.log(`[POST] Category found after creation attempt: ${category.name}`);
+            }
+          }
+        }
+        
+        if (category) {
+          validatedCategoryId = category.id;
+          console.log(`[POST] Category validated: ${category.name} (ID: ${validatedCategoryId})`);
+        }
+      } catch (error: any) {
+        console.error('Error validating category:', error);
+        validatedCategoryId = null;
+      }
+    }
+
+    // Validate and handle subcategory
+    let validatedSubcategoryId = null;
+    if (subcategory_id && String(subcategory_id).trim() !== '') {
+      try {
+        const subcategoryIdStr = String(subcategory_id).trim();
+        let subcategory = null;
+        
+        if (isUUID(subcategoryIdStr)) {
+          subcategory = await prisma.subcategory.findUnique({
+            where: { id: subcategoryIdStr },
+            include: { category: true },
+          });
+        }
+        
+        if (!subcategory) {
+          subcategory = await prisma.subcategory.findFirst({
+            where: { name: subcategoryIdStr },
+            include: { category: true },
+          });
+        }
+        
+        // If still not found and we have a category, auto-create it
+        if (!subcategory && validatedCategoryId) {
+          try {
+            subcategory = await prisma.subcategory.create({
+              data: {
+                name: subcategoryIdStr,
+                categoryId: validatedCategoryId,
+                status: 'active',
+              },
+              include: { category: true },
+            });
+            console.log(`Subcategory auto-created: ${subcategory.name} (ID: ${subcategory.id})`);
+          } catch (createError: any) {
+            // If creation fails (e.g., unique constraint), try to find it again
+            subcategory = await prisma.subcategory.findFirst({
+              where: { 
+                name: subcategoryIdStr,
+                categoryId: validatedCategoryId 
+              },
+              include: { category: true },
+            });
+            if (subcategory) {
+              console.log(`Subcategory found after creation attempt: ${subcategory.name}`);
+            } else {
+              console.error('Error auto-creating subcategory:', createError);
+            }
+          }
+        }
+        
+        if (subcategory) {
+          validatedSubcategoryId = subcategory.id;
+          // Auto-set category if not already set
+          if (!validatedCategoryId) {
+            validatedCategoryId = subcategory.categoryId;
+          }
+          console.log(`Subcategory validated: ${subcategory.name} (ID: ${validatedSubcategoryId})`);
+        } else {
+          console.log(`Subcategory not found and cannot be created (no category): ${subcategoryIdStr}`);
+        }
+      } catch (error: any) {
+        console.error('Error validating subcategory:', error);
+        validatedSubcategoryId = null;
+      }
+    }
+
+    // Validate and handle application (with auto-creation if name provided and subcategory exists)
+    let validatedApplicationId = null;
+    if (application_id && String(application_id).trim() !== '') {
+      try {
+        const applicationIdStr = String(application_id).trim();
+        let application = null;
+        
+        if (isUUID(applicationIdStr)) {
+          // Try to find by ID
+          application = await prisma.application.findUnique({
+            where: { id: applicationIdStr },
+            include: { subcategory: { include: { category: true } } },
+          });
+        }
+        
+        // If not found by ID, try to find by name
+        if (!application) {
+          if (validatedSubcategoryId) {
+            // Try within the validated subcategory
+            application = await prisma.application.findFirst({
+              where: { 
+                name: applicationIdStr,
+                subcategoryId: validatedSubcategoryId 
+              },
+              include: { subcategory: { include: { category: true } } },
+            });
+          }
+          
+          // If still not found, try any subcategory
+          if (!application) {
+            application = await prisma.application.findFirst({
+              where: { name: applicationIdStr },
+              include: { subcategory: { include: { category: true } } },
+            });
+          }
+        }
+        
+        // If still not found and we have a subcategory, auto-create it
+        if (!application && validatedSubcategoryId) {
+          try {
+            application = await prisma.application.create({
+              data: {
+                name: applicationIdStr,
+                subcategoryId: validatedSubcategoryId,
+                status: 'active',
+              },
+              include: { subcategory: { include: { category: true } } },
+            });
+            console.log(`Application auto-created: ${application.name} (ID: ${application.id})`);
+          } catch (createError: any) {
+            // If creation fails (e.g., unique constraint), try to find it again
+            application = await prisma.application.findFirst({
+              where: { 
+                name: applicationIdStr,
+                subcategoryId: validatedSubcategoryId 
+              },
+              include: { subcategory: { include: { category: true } } },
+            });
+            if (application) {
+              console.log(`Application found after creation attempt: ${application.name}`);
+            } else {
+              console.error('Error auto-creating application:', createError);
+            }
+          }
+        }
+        
+        if (application) {
+          validatedApplicationId = application.id;
+          // Auto-set subcategory and category if not already set
+          if (!validatedSubcategoryId) {
+            validatedSubcategoryId = application.subcategoryId;
+            if (application.subcategory?.categoryId) {
+              validatedCategoryId = application.subcategory.categoryId;
+            }
+          }
+          console.log(`Application validated: ${application.name} (ID: ${validatedApplicationId})`);
+        } else {
+          console.log(`Application not found and cannot be created (no subcategory): ${applicationIdStr}`);
+        }
+      } catch (error: any) {
+        console.error('Error validating application:', error);
+        validatedApplicationId = null;
+      }
+    }
+
     // Create part with models
     const part = await prisma.part.create({
       data: {
@@ -513,9 +724,9 @@ router.post('/', async (req: Request, res: Response) => {
         partNo: part_no,
         brandId,
         description: description || null,
-        categoryId: category_id || null,
-        subcategoryId: subcategory_id || null,
-        applicationId: application_id || null,
+        categoryId: validatedCategoryId || null,
+        subcategoryId: validatedSubcategoryId || null,
+        applicationId: validatedApplicationId || null,
         hsCode: hs_code || null,
         weight: weight ? parseFloat(weight) : null,
         reorderLevel: reorder_level ? parseInt(reorder_level) : 0,
@@ -640,22 +851,53 @@ router.put('/:id', async (req: Request, res: Response) => {
       return uuidRegex.test(str);
     };
 
-    // Validate category exists if provided
+    // Validate category exists if provided (auto-create if not found)
     let validatedCategoryId = null;
     if (category_id && String(category_id).trim() !== '') {
       try {
         const categoryIdStr = String(category_id).trim();
+        let category = null;
+        
         if (isUUID(categoryIdStr)) {
-          const category = await prisma.category.findUnique({
+          // Try to find by ID
+          category = await prisma.category.findUnique({
             where: { id: categoryIdStr },
           });
-          validatedCategoryId = category?.id || null;
+          console.log(`[PUT] Category lookup by ID: ${category ? 'found' : 'not found'}`);
         } else {
           // Try to find by name
-          const category = await prisma.category.findUnique({
+          category = await prisma.category.findUnique({
             where: { name: categoryIdStr },
           });
-          validatedCategoryId = category?.id || null;
+          console.log(`[PUT] Category lookup by name: ${category ? 'found' : 'not found'}`);
+        }
+        
+        // If not found, auto-create it
+        if (!category) {
+          console.log(`[PUT] Attempting to auto-create category: "${categoryIdStr}"`);
+          try {
+            category = await prisma.category.create({
+              data: {
+                name: categoryIdStr,
+                status: 'active',
+              },
+            });
+            console.log(`[PUT] Category auto-created: ${category.name} (ID: ${category.id})`);
+          } catch (createError: any) {
+            console.error(`[PUT] Error auto-creating category: ${createError.message}`);
+            // If creation fails (e.g., unique constraint), try to find it again
+            category = await prisma.category.findUnique({
+              where: { name: categoryIdStr },
+            });
+            if (category) {
+              console.log(`[PUT] Category found after creation attempt: ${category.name}`);
+            }
+          }
+        }
+        
+        if (category) {
+          validatedCategoryId = category.id;
+          console.log(`[PUT] Category validated: ${category.name} (ID: ${validatedCategoryId})`);
         }
       } catch (error: any) {
         console.error('Error validating category:', error);
@@ -668,6 +910,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     if (subcategory_id && String(subcategory_id).trim() !== '') {
       try {
         const subcategoryIdStr = String(subcategory_id).trim();
+        console.log(`[PUT] Validating subcategory: "${subcategoryIdStr}" (isUUID: ${isUUID(subcategoryIdStr)}, validatedCategoryId: ${validatedCategoryId})`);
         let subcategory = null;
         
         if (isUUID(subcategoryIdStr)) {
@@ -676,6 +919,7 @@ router.put('/:id', async (req: Request, res: Response) => {
             where: { id: subcategoryIdStr },
             include: { category: true },
           });
+          console.log(`[PUT] Subcategory lookup by ID: ${subcategory ? 'found' : 'not found'}`);
         }
         
         // If not found by ID, try to find by name
@@ -689,6 +933,7 @@ router.put('/:id', async (req: Request, res: Response) => {
               },
               include: { category: true },
             });
+            console.log(`[PUT] Subcategory lookup by name in category: ${subcategory ? 'found' : 'not found'}`);
           }
           
           // If still not found, try any category
@@ -697,7 +942,41 @@ router.put('/:id', async (req: Request, res: Response) => {
               where: { name: subcategoryIdStr },
               include: { category: true },
             });
+            console.log(`[PUT] Subcategory lookup by name (any category): ${subcategory ? 'found' : 'not found'}`);
           }
+        }
+        
+        // If still not found and we have a category, auto-create it
+        if (!subcategory && validatedCategoryId) {
+          console.log(`[PUT] Attempting to auto-create subcategory: "${subcategoryIdStr}" in category: ${validatedCategoryId}`);
+          try {
+            subcategory = await prisma.subcategory.create({
+              data: {
+                name: subcategoryIdStr,
+                categoryId: validatedCategoryId,
+                status: 'active',
+              },
+              include: { category: true },
+            });
+            console.log(`[PUT] Subcategory auto-created: ${subcategory.name} (ID: ${subcategory.id})`);
+          } catch (createError: any) {
+            console.error(`[PUT] Error auto-creating subcategory: ${createError.message}`);
+            // If creation fails (e.g., unique constraint), try to find it again
+            subcategory = await prisma.subcategory.findFirst({
+              where: { 
+                name: subcategoryIdStr,
+                categoryId: validatedCategoryId 
+              },
+              include: { category: true },
+            });
+            if (subcategory) {
+              console.log(`[PUT] Subcategory found after creation attempt: ${subcategory.name}`);
+            } else {
+              console.error(`[PUT] Subcategory still not found after creation attempt`);
+            }
+          }
+        } else if (!subcategory) {
+          console.log(`[PUT] Subcategory not found and cannot be created (no category): ${subcategoryIdStr}`);
         }
         
         if (subcategory) {
@@ -706,6 +985,7 @@ router.put('/:id', async (req: Request, res: Response) => {
           if (!validatedCategoryId) {
             validatedCategoryId = subcategory.categoryId;
           }
+          console.log(`[PUT] Subcategory validated: ${subcategory.name} (ID: ${validatedSubcategoryId})`);
         }
       } catch (error: any) {
         console.error('Error validating subcategory:', error);
@@ -718,6 +998,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     if (application_id && String(application_id).trim() !== '') {
       try {
         const applicationIdStr = String(application_id).trim();
+        console.log(`[PUT] Validating application: "${applicationIdStr}" (isUUID: ${isUUID(applicationIdStr)}, validatedSubcategoryId: ${validatedSubcategoryId})`);
         let application = null;
         
         if (isUUID(applicationIdStr)) {
@@ -726,6 +1007,7 @@ router.put('/:id', async (req: Request, res: Response) => {
             where: { id: applicationIdStr },
             include: { subcategory: { include: { category: true } } },
           });
+          console.log(`[PUT] Application lookup by ID: ${application ? 'found' : 'not found'}`);
         }
         
         // If not found by ID, try to find by name
@@ -739,6 +1021,7 @@ router.put('/:id', async (req: Request, res: Response) => {
               },
               include: { subcategory: { include: { category: true } } },
             });
+            console.log(`[PUT] Application lookup by name in subcategory: ${application ? 'found' : 'not found'}`);
           }
           
           // If still not found, try any subcategory
@@ -747,7 +1030,41 @@ router.put('/:id', async (req: Request, res: Response) => {
               where: { name: applicationIdStr },
               include: { subcategory: { include: { category: true } } },
             });
+            console.log(`[PUT] Application lookup by name (any subcategory): ${application ? 'found' : 'not found'}`);
           }
+        }
+        
+        // If still not found and we have a subcategory, auto-create it
+        if (!application && validatedSubcategoryId) {
+          console.log(`[PUT] Attempting to auto-create application: "${applicationIdStr}" in subcategory: ${validatedSubcategoryId}`);
+          try {
+            application = await prisma.application.create({
+              data: {
+                name: applicationIdStr,
+                subcategoryId: validatedSubcategoryId,
+                status: 'active',
+              },
+              include: { subcategory: { include: { category: true } } },
+            });
+            console.log(`[PUT] Application auto-created: ${application.name} (ID: ${application.id})`);
+          } catch (createError: any) {
+            console.error(`[PUT] Error auto-creating application: ${createError.message}`);
+            // If creation fails (e.g., unique constraint), try to find it again
+            application = await prisma.application.findFirst({
+              where: { 
+                name: applicationIdStr,
+                subcategoryId: validatedSubcategoryId 
+              },
+              include: { subcategory: { include: { category: true } } },
+            });
+            if (application) {
+              console.log(`[PUT] Application found after creation attempt: ${application.name}`);
+            } else {
+              console.error(`[PUT] Application still not found after creation attempt`);
+            }
+          }
+        } else if (!application) {
+          console.log(`[PUT] Application not found and cannot be created (no subcategory): ${applicationIdStr}`);
         }
         
         if (application) {
@@ -759,9 +1076,7 @@ router.put('/:id', async (req: Request, res: Response) => {
               validatedCategoryId = application.subcategory.categoryId;
             }
           }
-          console.log(`Application validated: ${application.name} (ID: ${validatedApplicationId})`);
-        } else {
-          console.log(`Application not found: ${applicationIdStr}`);
+          console.log(`[PUT] Application validated: ${application.name} (ID: ${validatedApplicationId})`);
         }
       } catch (error: any) {
         console.error('Error validating application:', error);

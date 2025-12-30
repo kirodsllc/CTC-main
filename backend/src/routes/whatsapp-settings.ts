@@ -131,7 +131,17 @@ router.post('/send-message', async (req, res) => {
       body: formData,
     });
 
-    const responseData = await response.json();
+    let responseData;
+    try {
+      responseData = await response.json();
+    } catch (e) {
+      const text = await response.text();
+      console.error('WhatsApp API response (not JSON):', text);
+      return res.status(500).json({ 
+        error: 'Invalid response from WhatsApp API',
+        details: text 
+      });
+    }
 
     if (!response.ok) {
       return res.status(response.status).json({ 
