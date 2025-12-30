@@ -634,6 +634,197 @@ router.put('/:id', async (req: Request, res: Response) => {
       brandId = brand.id;
     }
 
+    // Helper function to check if string looks like a UUID
+    const isUUID = (str: string) => {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      return uuidRegex.test(str);
+    };
+
+    // Validate category exists if provided
+    let validatedCategoryId = null;
+    if (category_id && String(category_id).trim() !== '') {
+      try {
+        const categoryIdStr = String(category_id).trim();
+        if (isUUID(categoryIdStr)) {
+          const category = await prisma.category.findUnique({
+            where: { id: categoryIdStr },
+          });
+          validatedCategoryId = category?.id || null;
+        } else {
+          // Try to find by name
+          const category = await prisma.category.findUnique({
+            where: { name: categoryIdStr },
+          });
+          validatedCategoryId = category?.id || null;
+        }
+      } catch (error: any) {
+        console.error('Error validating category:', error);
+        validatedCategoryId = null;
+      }
+    }
+
+    // Validate subcategory exists
+    let validatedSubcategoryId = null;
+    if (subcategory_id && String(subcategory_id).trim() !== '') {
+      try {
+        const subcategoryIdStr = String(subcategory_id).trim();
+        let subcategory = null;
+        
+        if (isUUID(subcategoryIdStr)) {
+          // Try to find by ID
+          subcategory = await prisma.subcategory.findUnique({
+            where: { id: subcategoryIdStr },
+            include: { category: true },
+          });
+        }
+        
+        // If not found by ID, try to find by name
+        if (!subcategory) {
+          if (validatedCategoryId) {
+            // Try within the validated category
+            subcategory = await prisma.subcategory.findFirst({
+              where: { 
+                name: subcategoryIdStr,
+                categoryId: validatedCategoryId 
+              },
+              include: { category: true },
+            });
+          }
+          
+          // If still not found, try any category
+          if (!subcategory) {
+            subcategory = await prisma.subcategory.findFirst({
+              where: { name: subcategoryIdStr },
+              include: { category: true },
+            });
+          }
+        }
+        
+        if (subcategory) {
+          validatedSubcategoryId = subcategory.id;
+          // Auto-set category if not already set
+          if (!validatedCategoryId) {
+            validatedCategoryId = subcategory.categoryId;
+          }
+        }
+      } catch (error: any) {
+        console.error('Error validating subcategory:', error);
+        validatedSubcategoryId = null;
+      }
+    }
+
+    // Validate application exists
+    let validatedApplicationId = null;
+    if (application_id && String(application_id).trim() !== '') {
+      try {
+        const applicationIdStr = String(application_id).trim();
+        let application = null;
+        
+        if (isUUID(applicationIdStr)) {
+          // Try to find by ID
+          application = await prisma.application.findUnique({
+            where: { id: applicationIdStr },
+            include: { subcategory: { include: { category: true } } },
+          });
+        }
+        
+        // If not found by ID, try to find by name
+        if (!application) {
+          if (validatedSubcategoryId) {
+            // Try within the validated subcategory
+            application = await prisma.application.findFirst({
+              where: { 
+                name: applicationIdStr,
+                subcategoryId: validatedSubcategoryId 
+              },
+              include: { subcategory: { include: { category: true } } },
+            });
+          }
+          
+          // If still not found, try any subcategory
+          if (!application) {
+            application = await prisma.application.findFirst({
+              where: { name: applicationIdStr },
+              include: { subcategory: { include: { category: true } } },
+            });
+          }
+        }
+        
+        if (application) {
+          validatedApplicationId = application.id;
+          // Auto-set subcategory and category if not already set
+          if (!validatedSubcategoryId) {
+            validatedSubcategoryId = application.subcategoryId;
+            if (application.subcategory?.categoryId) {
+              validatedCategoryId = application.subcategory.categoryId;
+            }
+          }
+          console.log(`Application validated: ${application.name} (ID: ${validatedApplicationId})`);
+        } else {
+          console.log(`Application not found: ${applicationIdStr}`);
+        }
+      } catch (error: any) {
+        console.error('Error validating application:', error);
+        validatedApplicationId = null;
+      }
+    }
+
+    // Ensure foreign key relationships are valid
+    // If subcategory is set, category must also be set and match
+    if (validatedSubcategoryId && !validatedCategoryId) {
+      // Get category from subcategory
+      try {
+        const subcategory = await prisma.subcategory.findUnique({
+          where: { id: validatedSubcategoryId },
+        });
+        if (subcategory) {
+          validatedCategoryId = subcategory.categoryId;
+        } else {
+          // Subcategory doesn't exist, clear it
+          validatedSubcategoryId = null;
+        }
+      } catch (error) {
+        validatedSubcategoryId = null;
+      }
+    }
+    
+    // If application is set, subcategory and category must also be set and match
+    if (validatedApplicationId) {
+      if (!validatedSubcategoryId) {
+        // Get subcategory from application
+        try {
+          const application = await prisma.application.findUnique({
+            where: { id: validatedApplicationId },
+            include: { subcategory: true },
+          });
+          if (application) {
+            validatedSubcategoryId = application.subcategoryId;
+            if (application.subcategory) {
+              validatedCategoryId = application.subcategory.categoryId;
+            }
+          } else {
+            // Application doesn't exist, clear it
+            validatedApplicationId = null;
+          }
+        } catch (error) {
+          validatedApplicationId = null;
+        }
+      } else {
+        // Verify application belongs to subcategory
+        try {
+          const application = await prisma.application.findUnique({
+            where: { id: validatedApplicationId },
+          });
+          if (application && application.subcategoryId !== validatedSubcategoryId) {
+            // Application doesn't belong to subcategory, clear it
+            validatedApplicationId = null;
+          }
+        } catch (error) {
+          validatedApplicationId = null;
+        }
+      }
+    }
+
     // Delete existing models and create new ones
     if (models && Array.isArray(models)) {
       await prisma.model.deleteMany({
@@ -641,39 +832,50 @@ router.put('/:id', async (req: Request, res: Response) => {
       });
     }
 
+    // Build update data object
+    const updateData: any = {
+      masterPartId,
+      partNo: part_no,
+      brandId,
+      description: description || null,
+      categoryId: validatedCategoryId,
+      subcategoryId: validatedSubcategoryId,
+      applicationId: validatedApplicationId,
+      hsCode: hs_code || null,
+      weight: weight ? parseFloat(weight) : null,
+      reorderLevel: reorder_level ? parseInt(reorder_level) : 0,
+      uom: uom || 'pcs',
+      cost: cost ? parseFloat(cost) : null,
+      priceA: price_a ? parseFloat(price_a) : null,
+      priceB: price_b ? parseFloat(price_b) : null,
+      priceM: price_m ? parseFloat(price_m) : null,
+      smc: smc || null,
+      size: size || null,
+      status: status || 'active',
+    };
+
+    // Handle images - explicitly set to null if provided as null/empty string, otherwise keep existing if not provided
+    if ('image_p1' in req.body) {
+      updateData.imageP1 = (image_p1 && image_p1.trim() !== '') ? image_p1 : null;
+    }
+    if ('image_p2' in req.body) {
+      updateData.imageP2 = (image_p2 && image_p2.trim() !== '') ? image_p2 : null;
+    }
+
+    // Handle models
+    if (models && Array.isArray(models)) {
+      updateData.models = {
+        create: models.map((m: any) => ({
+          name: m.name,
+          qtyUsed: m.qty_used || m.qtyUsed || 1,
+        })),
+      };
+    }
+
     // Update part
     const part = await prisma.part.update({
       where: { id },
-      data: {
-        masterPartId,
-        partNo: part_no,
-        brandId,
-        description: description || null,
-        categoryId: category_id || null,
-        subcategoryId: subcategory_id || null,
-        applicationId: application_id || null,
-        hsCode: hs_code || null,
-        weight: weight ? parseFloat(weight) : null,
-        reorderLevel: reorder_level ? parseInt(reorder_level) : 0,
-        uom: uom || 'pcs',
-        cost: cost ? parseFloat(cost) : null,
-        priceA: price_a ? parseFloat(price_a) : null,
-        priceB: price_b ? parseFloat(price_b) : null,
-        priceM: price_m ? parseFloat(price_m) : null,
-        smc: smc || null,
-        size: size || null,
-        imageP1: image_p1 || null,
-        imageP2: image_p2 || null,
-        status: status || 'active',
-        models: models && Array.isArray(models)
-          ? {
-              create: models.map((m: any) => ({
-                name: m.name,
-                qtyUsed: m.qty_used || m.qtyUsed || 1,
-              })),
-            }
-          : undefined,
-      },
+      data: updateData,
       include: {
         masterPart: true,
         brand: true,
@@ -683,6 +885,9 @@ router.put('/:id', async (req: Request, res: Response) => {
         models: true,
       },
     });
+
+    // Debug log to verify application is included
+    console.log(`Part updated - Application: ${part.application?.name || 'null'}, Application ID: ${part.applicationId || 'null'}`);
 
     res.json({
       id: part.id,
@@ -716,6 +921,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Error updating part:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

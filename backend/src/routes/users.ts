@@ -1,6 +1,7 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import prisma from '../config/database';
+import { logActivity, getClientIp } from '../utils/activityLogger';
 
 const router = express.Router();
 
@@ -116,6 +117,9 @@ router.post('/', async (req, res) => {
       status,
       password,
     } = req.body;
+    
+    // Get current user from request (you'll need to implement authentication middleware)
+    const currentUser = req.user || { name: 'System', role: 'Admin' };
 
     if (!name || !email) {
       return res.status(400).json({ error: 'Name and email are required' });
@@ -155,6 +159,19 @@ router.post('/', async (req, res) => {
         lastLogin: true,
         createdAt: true,
       },
+    });
+
+    // Log activity
+    await logActivity({
+      user: currentUser.name,
+      userRole: currentUser.role,
+      action: 'Created User',
+      actionType: 'create',
+      module: 'Users',
+      description: `Created new user: ${name} (${email})`,
+      ipAddress: getClientIp(req),
+      status: 'success',
+      details: { userId: user.id, email: user.email, role: user.role },
     });
 
     res.status(201).json({ data: { ...user, createdAt: user.createdAt.toISOString().split('T')[0] } });
@@ -214,8 +231,28 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/users/:id - Delete user
 router.delete('/:id', async (req, res) => {
   try {
+    // Get user info before deleting
+    const deletedUser = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: { name: true, email: true },
+    });
+
     await prisma.user.delete({
       where: { id: req.params.id },
+    });
+
+    // Log activity
+    const currentUser = req.user || { name: 'System', role: 'Admin' };
+    await logActivity({
+      user: currentUser.name,
+      userRole: currentUser.role,
+      action: 'Deleted User',
+      actionType: 'delete',
+      module: 'Users',
+      description: `Deleted user: ${deletedUser?.name || 'Unknown'} (${deletedUser?.email || 'Unknown'})`,
+      ipAddress: getClientIp(req),
+      status: 'success',
+      details: { userId: req.params.id },
     });
 
     res.json({ message: 'User deleted successfully' });

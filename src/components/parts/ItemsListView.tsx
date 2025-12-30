@@ -541,24 +541,33 @@ export const ItemsListView = ({ items, onEdit, onDelete, onAddNew, onStatusChang
                           </DropdownMenu>
                         </TableCell>
                         <TableCell>
-                          {item.images.length > 0 ? (
+                          {item.images && item.images.length > 0 && item.images.some(img => img && img.trim() !== '') ? (
                             <button 
                               onClick={() => {
-                                setSelectedImages(item.images);
+                                const validImages = item.images.filter(img => img && img.trim() !== '');
+                                setSelectedImages(validImages);
                                 setCurrentImageIndex(0);
                                 setImageModalOpen(true);
                               }}
                               className="flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
                             >
                               <div className="relative">
-                                <img 
-                                  src={item.images[0]} 
-                                  alt="Product" 
-                                  className="w-8 h-8 rounded object-cover border border-border"
-                                />
-                                {item.images.length > 1 && (
+                                {(() => {
+                                  const firstValidImage = item.images.find(img => img && img.trim() !== '');
+                                  return firstValidImage ? (
+                                    <img 
+                                      src={firstValidImage} 
+                                      alt="Product" 
+                                      className="w-8 h-8 rounded object-cover border border-border"
+                                      onError={(e) => {
+                                        (e.target as HTMLImageElement).style.display = 'none';
+                                      }}
+                                    />
+                                  ) : null;
+                                })()}
+                                {item.images.filter(img => img && img.trim() !== '').length > 1 && (
                                   <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-medium">
-                                    +{item.images.length - 1}
+                                    +{item.images.filter(img => img && img.trim() !== '').length - 1}
                                   </span>
                                 )}
                               </div>
@@ -619,11 +628,14 @@ export const ItemsListView = ({ items, onEdit, onDelete, onAddNew, onStatusChang
             <DialogTitle>Product Image</DialogTitle>
           </VisuallyHidden>
           <div className="relative">
-            {selectedImages.length > 0 && (
+            {selectedImages.length > 0 && selectedImages[currentImageIndex] && (
               <img 
                 src={selectedImages[currentImageIndex]} 
                 alt="Product" 
                 className="w-full h-auto max-h-[70vh] object-contain"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="300"%3E%3Crect fill="%23ddd" width="400" height="300"/%3E%3Ctext fill="%23999" font-family="sans-serif" font-size="20" dy="10.5" font-weight="bold" x="50%25" y="50%25" text-anchor="middle"%3EImage not available%3C/text%3E%3C/svg%3E';
+                }}
               />
             )}
             {selectedImages.length > 1 && (
@@ -646,18 +658,27 @@ export const ItemsListView = ({ items, onEdit, onDelete, onAddNew, onStatusChang
           {selectedImages.length > 1 && (
             <div className="p-3 border-t border-border flex gap-2 overflow-x-auto">
               {selectedImages.map((img, index) => (
-                <button
-                  key={index}
-                  onClick={() => setCurrentImageIndex(index)}
-                  className={cn(
-                    "flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 transition-all",
-                    currentImageIndex === index 
-                      ? "border-primary" 
-                      : "border-transparent hover:border-muted-foreground/50"
-                  )}
-                >
-                  <img src={img} alt="" className="w-full h-full object-cover" />
-                </button>
+                img && img.trim() !== '' && (
+                  <button
+                    key={index}
+                    onClick={() => setCurrentImageIndex(index)}
+                    className={cn(
+                      "flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 transition-all",
+                      currentImageIndex === index 
+                        ? "border-primary" 
+                        : "border-transparent hover:border-muted-foreground/50"
+                    )}
+                  >
+                    <img 
+                      src={img} 
+                      alt="" 
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="56" height="56"%3E%3Crect fill="%23ddd" width="56" height="56"/%3E%3C/svg%3E';
+                      }}
+                    />
+                  </button>
+                )
               ))}
             </div>
           )}

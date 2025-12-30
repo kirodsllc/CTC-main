@@ -25,25 +25,37 @@ router.get('/expense-types', async (req: Request, res: Response) => {
       where.status = status;
     }
 
-    const [expenseTypes, total] = await Promise.all([
-      prisma.expenseType.findMany({
-        where,
-        skip,
-        take: limitNum,
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.expenseType.count({ where }),
-    ]);
+    // Check if table exists first
+    try {
+      const [expenseTypes, total] = await Promise.all([
+        prisma.expenseType.findMany({
+          where,
+          skip,
+          take: limitNum,
+          orderBy: { createdAt: 'desc' },
+        }),
+        prisma.expenseType.count({ where }),
+      ]);
 
-    res.json({
-      data: expenseTypes,
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total,
-        totalPages: Math.ceil(total / limitNum),
-      },
-    });
+      res.json({
+        data: expenseTypes,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum),
+        },
+      });
+    } catch (tableError: any) {
+      if (tableError.message && tableError.message.includes('does not exist')) {
+        console.error('ExpenseType table does not exist. Please run migration.');
+        res.status(500).json({ 
+          error: 'Database tables not initialized. Please run: npx prisma db push or apply migration.' 
+        });
+      } else {
+        throw tableError;
+      }
+    }
   } catch (error: any) {
     console.error('Error fetching expense types:', error);
     res.status(500).json({ error: error.message });
@@ -307,42 +319,59 @@ router.get('/statistics', async (req: Request, res: Response) => {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-    const [totalExpenses, operationalExpenses, expenseTypes] = await Promise.all([
-      // Total expenses this month (from posted expenses)
-      prisma.postedExpense.aggregate({
-        _sum: { amount: true },
-        where: {
-          date: {
-            gte: startOfMonth,
-            lte: endOfMonth,
+    try {
+      const [totalExpenses, operationalExpenses, expenseTypes] = await Promise.all([
+        // Total expenses this month (from posted expenses)
+        prisma.postedExpense.aggregate({
+          _sum: { amount: true },
+          where: {
+            date: {
+              gte: startOfMonth,
+              lte: endOfMonth,
+            },
           },
-        },
-      }),
-      // Operational expenses count and total
-      prisma.operationalExpense.aggregate({
-        _sum: { amount: true },
-        _count: true,
-        where: {
-          date: {
-            gte: startOfMonth,
-            lte: endOfMonth,
+        }),
+        // Operational expenses count and total
+        prisma.operationalExpense.aggregate({
+          _sum: { amount: true },
+          _count: true,
+          where: {
+            date: {
+              gte: startOfMonth,
+              lte: endOfMonth,
+            },
           },
-        },
-      }),
-      // Active expense types count
-      prisma.expenseType.count({
-        where: { status: 'Active' },
-      }),
-    ]);
+        }),
+        // Active expense types count
+        prisma.expenseType.count({
+          where: { status: 'Active' },
+        }),
+      ]);
 
-    res.json({
-      data: {
-        totalExpenses: totalExpenses._sum.amount || 0,
-        operationalExpenses: operationalExpenses._sum.amount || 0,
-        operationalExpensesCount: operationalExpenses._count || 0,
-        expenseTypesCount: expenseTypes,
-      },
-    });
+      res.json({
+        data: {
+          totalExpenses: totalExpenses._sum.amount || 0,
+          operationalExpenses: operationalExpenses._sum.amount || 0,
+          operationalExpensesCount: operationalExpenses._count || 0,
+          expenseTypesCount: expenseTypes,
+        },
+      });
+    } catch (tableError: any) {
+      if (tableError.message && tableError.message.includes('does not exist')) {
+        console.error('Expense tables do not exist. Please run migration.');
+        res.status(500).json({ 
+          error: 'Database tables not initialized. Please run: npx prisma db push or apply migration.',
+          data: {
+            totalExpenses: 0,
+            operationalExpenses: 0,
+            operationalExpensesCount: 0,
+            expenseTypesCount: 0,
+          }
+        });
+      } else {
+        throw tableError;
+      }
+    }
   } catch (error: any) {
     console.error('Error fetching expense statistics:', error);
     res.status(500).json({ error: error.message });

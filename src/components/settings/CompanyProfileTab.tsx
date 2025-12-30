@@ -130,10 +130,61 @@ export const CompanyProfileTab = () => {
           console.error(response.error);
         } else if (response.data) {
           const data = response.data;
-          if (data.companyInfo) setCompanyInfo(data.companyInfo);
-          if (data.systemSettings) setSystemSettings(data.systemSettings);
-          if (data.invoiceSettings) setInvoiceSettings(data.invoiceSettings);
-          if (data.notificationSettings) setNotificationSettings(data.notificationSettings);
+          
+          // Safely merge companyInfo with defaults, ensuring all string fields are never undefined
+          if (data.companyInfo) {
+            setCompanyInfo({
+              name: data.companyInfo.name || "",
+              legalName: data.companyInfo.legalName || "",
+              email: data.companyInfo.email || "",
+              phone: data.companyInfo.phone || "",
+              fax: data.companyInfo.fax || "",
+              website: data.companyInfo.website || "",
+              address: data.companyInfo.address || "",
+              city: data.companyInfo.city || "",
+              state: data.companyInfo.state || "",
+              country: data.companyInfo.country || "",
+              postalCode: data.companyInfo.postalCode || "",
+              taxId: data.companyInfo.taxId || "",
+              registrationNo: data.companyInfo.registrationNo || "",
+            });
+          }
+          
+          // Safely merge systemSettings with defaults
+          if (data.systemSettings) {
+            setSystemSettings({
+              dateFormat: data.systemSettings.dateFormat || "DD/MM/YYYY",
+              timeFormat: data.systemSettings.timeFormat || "24h",
+              currency: data.systemSettings.currency || "PKR",
+              timezone: data.systemSettings.timezone || "Asia/Karachi",
+              language: data.systemSettings.language || "English",
+              fiscalYearStart: data.systemSettings.fiscalYearStart || "January",
+            });
+          }
+          
+          // Safely merge invoiceSettings with defaults
+          if (data.invoiceSettings) {
+            setInvoiceSettings({
+              prefix: data.invoiceSettings.prefix || "INV-",
+              startingNumber: data.invoiceSettings.startingNumber ?? 1001,
+              footer: data.invoiceSettings.footer || "",
+              termsConditions: data.invoiceSettings.termsConditions || "",
+              showLogo: data.invoiceSettings.showLogo ?? true,
+              showTaxBreakdown: data.invoiceSettings.showTaxBreakdown ?? true,
+            });
+          }
+          
+          // Safely merge notificationSettings with defaults
+          if (data.notificationSettings) {
+            setNotificationSettings({
+              emailNotifications: data.notificationSettings.emailNotifications ?? true,
+              lowStockAlerts: data.notificationSettings.lowStockAlerts ?? true,
+              orderUpdates: data.notificationSettings.orderUpdates ?? true,
+              paymentReminders: data.notificationSettings.paymentReminders ?? true,
+              dailyReports: data.notificationSettings.dailyReports ?? false,
+              weeklyReports: data.notificationSettings.weeklyReports ?? true,
+            });
+          }
         }
       } catch (error: any) {
         console.error("Failed to fetch company profile:", error);
@@ -422,8 +473,14 @@ export const CompanyProfileTab = () => {
                   <Label>Starting Number</Label>
                   <Input
                     type="number"
-                    value={invoiceSettings.startingNumber}
-                    onChange={(e) => setInvoiceSettings({ ...invoiceSettings, startingNumber: parseInt(e.target.value) })}
+                    value={invoiceSettings.startingNumber ?? ""}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setInvoiceSettings({ 
+                        ...invoiceSettings, 
+                        startingNumber: value === "" ? 1001 : (parseInt(value) || 1001)
+                      });
+                    }}
                   />
                 </div>
                 <div className="space-y-2 md:col-span-2">

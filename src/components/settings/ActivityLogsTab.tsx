@@ -104,6 +104,12 @@ export const ActivityLogsTab = () => {
   const [page, setPage] = useState(1);
   const [limit] = useState(20);
   const [total, setTotal] = useState(0);
+  const [stats, setStats] = useState({
+    total: 0,
+    success: 0,
+    warning: 0,
+    error: 0,
+  });
 
   const fetchLogs = async () => {
     try {
@@ -123,6 +129,18 @@ export const ActivityLogsTab = () => {
         setLogs(response.data || []);
         if (response.pagination) {
           setTotal(response.pagination.total);
+        }
+        // Update stats from backend if available
+        if (response.stats) {
+          setStats(response.stats);
+        } else {
+          // Fallback: calculate from current page if stats not available
+          setStats({
+            total: response.pagination?.total || 0,
+            success: (response.data || []).filter((l: ActivityLog) => l.status === "success").length,
+            warning: (response.data || []).filter((l: ActivityLog) => l.status === "warning").length,
+            error: (response.data || []).filter((l: ActivityLog) => l.status === "error").length,
+          });
         }
       }
     } catch (error: any) {
@@ -147,14 +165,7 @@ export const ActivityLogsTab = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Calculate stats from current page (for now)
-  // In production, you'd want a dedicated stats endpoint
-  const stats = {
-    total: total,
-    success: logs.filter(l => l.status === "success").length,
-    warning: logs.filter(l => l.status === "warning").length,
-    error: logs.filter(l => l.status === "error").length,
-  };
+  // Stats are now fetched from backend and stored in state
 
   const getInitials = (name: string) => name.split(' ').map(n => n[0]).join('').toUpperCase();
 
@@ -298,7 +309,7 @@ export const ActivityLogsTab = () => {
                   <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                     <div className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
-                      {log.timestamp}
+                      {log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A'}
                     </div>
                   </TableCell>
                   <TableCell>
@@ -400,7 +411,7 @@ export const ActivityLogsTab = () => {
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Timestamp</p>
-                  <p className="font-medium">{selectedLog.timestamp}</p>
+                  <p className="font-medium">{selectedLog.timestamp ? new Date(selectedLog.timestamp).toLocaleString() : 'N/A'}</p>
                 </div>
               </div>
               <div>

@@ -31,12 +31,14 @@ router.get('/', async (req, res) => {
       where.actionType = actionType;
     }
 
-    // Search filter
+    // Search filter (SQLite doesn't support case-insensitive mode, so we'll search in lowercase)
     if (search) {
       const searchTerm = (search as string).toLowerCase();
       where.OR = [
         { user: { contains: searchTerm } },
         { description: { contains: searchTerm } },
+        { action: { contains: searchTerm } },
+        { module: { contains: searchTerm } },
       ];
     }
 
@@ -61,7 +63,14 @@ router.get('/', async (req, res) => {
       prisma.activityLog.count({ where }),
     ]);
 
-    // Parse details JSON
+    // Get stats for all logs (not just current page)
+    const [successCount, warningCount, errorCount] = await Promise.all([
+      prisma.activityLog.count({ where: { ...where, status: 'success' } }),
+      prisma.activityLog.count({ where: { ...where, status: 'warning' } }),
+      prisma.activityLog.count({ where: { ...where, status: 'error' } }),
+    ]);
+
+    // Parse details JSON and format for frontend
     const formattedLogs = logs.map(log => {
       let details: Record<string, string> | undefined;
       try {
@@ -70,8 +79,20 @@ router.get('/', async (req, res) => {
         details = undefined;
       }
 
+      // Format timestamp from createdAt
+      const timestamp = log.timestamp || (log.createdAt ? new Date(log.createdAt).toISOString() : new Date().toISOString());
+
       return {
-        ...log,
+        id: log.id,
+        timestamp: timestamp,
+        user: log.user || '',
+        userRole: log.userRole || '',
+        action: log.action || '',
+        actionType: log.actionType || '',
+        module: log.module || '',
+        description: log.description || '',
+        ipAddress: log.ipAddress || '',
+        status: log.status || 'success',
         details,
       };
     });
@@ -83,6 +104,12 @@ router.get('/', async (req, res) => {
         limit: limitNum,
         total,
         totalPages: Math.ceil(total / limitNum),
+      },
+      stats: {
+        total,
+        success: successCount,
+        warning: warningCount,
+        error: errorCount,
       },
     });
   } catch (error: any) {

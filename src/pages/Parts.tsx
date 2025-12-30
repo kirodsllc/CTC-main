@@ -75,21 +75,30 @@ const Parts = () => {
       setItemsLoading(true);
       try {
         const response = await apiClient.getParts({ limit: 1000 });
-        if (response.data) {
+        if (response.data && Array.isArray(response.data)) {
           // Transform API data to Item format for ItemsListView
-          const transformedItems: Item[] = response.data.map((p: any) => ({
-            id: p.id,
-            masterPartNo: p.master_part_no || "",
-            partNo: p.part_no,
-            brand: p.brand_name || "",
-            description: p.description || "",
-            category: p.category_name || "",
-            subCategory: p.subcategory_name || "",
-            application: p.application_name || "",
-            status: p.status === "active" ? "Active" : "Inactive",
-            images: [p.image_p1, p.image_p2].filter(Boolean),
-          }));
+          const transformedItems: Item[] = response.data.map((p: any) => {
+            // Debug log to check data structure
+            if (!p.category_name && p.category) {
+              console.warn('Part has category object but no category_name:', p);
+            }
+            return {
+              id: p.id,
+              masterPartNo: p.master_part_no || "",
+              partNo: p.part_no || "",
+              brand: p.brand_name || "",
+              description: p.description || "",
+              category: p.category_name || (p.category?.name) || "",
+              subCategory: p.subcategory_name || (p.subcategory?.name) || "",
+              application: p.application_name || (p.application?.name) || "",
+              status: p.status === "active" ? "Active" : "Inactive",
+              images: [p.image_p1, p.image_p2].filter(img => img && img.trim() !== ''),
+            };
+          });
           setItems(transformedItems);
+        } else {
+          console.error('Invalid response structure:', response);
+          setItems([]);
         }
       } catch (error: any) {
         console.error("Error fetching items:", error);
@@ -136,12 +145,19 @@ const Parts = () => {
         })) || [],
       };
 
-      // Add images if provided
-      if (partData.imageP1) {
-        apiData.image_p1 = partData.imageP1;
-      }
-      if (partData.imageP2) {
-        apiData.image_p2 = partData.imageP2;
+      // Handle images - if updating, explicitly set to null if not provided to clear them
+      if (selectedPart) {
+        // When updating, always include image fields (null if not provided to clear old images)
+        apiData.image_p1 = partData.imageP1 !== undefined ? partData.imageP1 : null;
+        apiData.image_p2 = partData.imageP2 !== undefined ? partData.imageP2 : null;
+      } else {
+        // When creating, only add if provided
+        if (partData.imageP1) {
+          apiData.image_p1 = partData.imageP1;
+        }
+        if (partData.imageP2) {
+          apiData.image_p2 = partData.imageP2;
+        }
       }
 
       let response;
@@ -175,6 +191,28 @@ const Parts = () => {
       } else {
         setParts((prev) => [newPart, ...prev]);
       }
+      
+      // Always refresh items list after create/update to ensure latest data with categories/applications
+      try {
+        const itemsResponse = await apiClient.getParts({ limit: 1000 });
+        if (itemsResponse.data && Array.isArray(itemsResponse.data)) {
+          const transformedItems: Item[] = itemsResponse.data.map((p: any) => ({
+            id: p.id,
+            masterPartNo: p.master_part_no || "",
+            partNo: p.part_no || "",
+            brand: p.brand_name || "",
+            description: p.description || "",
+            category: p.category_name || (p.category?.name) || "",
+            subCategory: p.subcategory_name || (p.subcategory?.name) || "",
+            application: p.application_name || (p.application?.name) || "",
+            status: p.status === "active" ? "Active" : "Inactive",
+            images: [p.image_p1, p.image_p2].filter(img => img && img.trim() !== ''),
+          }));
+          setItems(transformedItems);
+        }
+      } catch (error) {
+        console.error("Error refreshing items:", error);
+      }
 
       toast({
         title: "Success",
@@ -192,24 +230,21 @@ const Parts = () => {
     }
   };
 
+  const [kitRefreshTrigger, setKitRefreshTrigger] = useState(0);
+
   const handleSaveKit = (kitData: any) => {
-    const newKit: Kit = {
-      id: Date.now().toString(),
-      name: kitData.kitName,
-      badge: kitData.status,
-      itemsCount: kitData.items.length,
-      totalCost: 0,
-      price: parseFloat(kitData.sellingPrice) || 0,
-    };
-    setKits((prev) => [newKit, ...prev]);
+    // Kit is saved via API in CreateKitForm, just trigger refresh
+    setKitRefreshTrigger(prev => prev + 1);
   };
 
   const handleDeleteKit = (kit: Kit) => {
-    setKits((prev) => prev.filter((k) => k.id !== kit.id));
+    // Kit is deleted via API in KitsList, just trigger refresh
+    setKitRefreshTrigger(prev => prev + 1);
   };
 
   const handleUpdateKit = (updatedKit: Kit) => {
-    setKits((prev) => prev.map((k) => k.id === updatedKit.id ? updatedKit : k));
+    // Kit is updated via API in EditKitForm, just trigger refresh
+    setKitRefreshTrigger(prev => prev + 1);
   };
 
   return (
@@ -242,18 +277,18 @@ const Parts = () => {
                 setItemsLoading(true);
                 try {
                   const response = await apiClient.getParts({ limit: 1000 });
-                  if (response.data) {
+                  if (response.data && Array.isArray(response.data)) {
                     const transformedItems: Item[] = response.data.map((p: any) => ({
                       id: p.id,
                       masterPartNo: p.master_part_no || "",
-                      partNo: p.part_no,
+                      partNo: p.part_no || "",
                       brand: p.brand_name || "",
                       description: p.description || "",
-                      category: p.category_name || "",
-                      subCategory: p.subcategory_name || "",
-                      application: p.application_name || "",
+                      category: p.category_name || (p.category?.name) || "",
+                      subCategory: p.subcategory_name || (p.subcategory?.name) || "",
+                      application: p.application_name || (p.application?.name) || "",
                       status: p.status === "active" ? "Active" : "Inactive",
-                      images: [p.image_p1, p.image_p2].filter(Boolean),
+                      images: [p.image_p1, p.image_p2].filter(img => img && img.trim() !== ''),
                     }));
                     setItems(transformedItems);
                   }
@@ -415,7 +450,7 @@ const Parts = () => {
                         }}
                       />
                     ) : (
-                      <KitsList kits={kits} onDelete={handleDeleteKit} onUpdateKit={handleUpdateKit} />
+                      <KitsList refreshTrigger={kitRefreshTrigger} onDelete={handleDeleteKit} onUpdateKit={handleUpdateKit} />
                     )}
                   </div>
                 </div>
@@ -448,9 +483,9 @@ const Parts = () => {
                       partNo: p.part_no,
                       brand: p.brand_name || "",
                       description: p.description || "",
-                      category: p.category_name || "",
-                      subCategory: p.subcategory_name || "",
-                      application: p.application_name || "",
+                      category: p.category_name || (p.category?.name) || "",
+                      subCategory: p.subcategory_name || (p.subcategory?.name) || "",
+                      application: p.application_name || (p.application?.name) || "",
                       status: p.status === "active" ? "Active" : "Inactive",
                       images: [p.image_p1, p.image_p2].filter(Boolean),
                     }));
@@ -505,9 +540,9 @@ const Parts = () => {
                       partNo: p.part_no,
                       brand: p.brand_name || "",
                       description: p.description || "",
-                      category: p.category_name || "",
-                      subCategory: p.subcategory_name || "",
-                      application: p.application_name || "",
+                      category: p.category_name || (p.category?.name) || "",
+                      subCategory: p.subcategory_name || (p.subcategory?.name) || "",
+                      application: p.application_name || (p.application?.name) || "",
                       status: p.status === "active" ? "Active" : "Inactive",
                       images: [p.image_p1, p.image_p2].filter(Boolean),
                     }));
@@ -544,9 +579,9 @@ const Parts = () => {
                     part_no: partData.partNo,
                     brand_name: partData.brand || null,
                     description: partData.description || null,
-                    category_id: partData.categoryId || null,
-                    subcategory_id: partData.subCategoryId || null,
-                    application_id: partData.applicationId || null,
+                    category_id: partData.categoryId || partData.category || null,
+                    subcategory_id: partData.subCategoryId || partData.subCategory || null,
+                    application_id: partData.applicationId || partData.application || null,
                     hs_code: partData.hsCode || null,
                     weight: partData.weight ? parseFloat(partData.weight) : null,
                     reorder_level: partData.reOrderLevel ? parseInt(partData.reOrderLevel) : 0,
@@ -560,12 +595,19 @@ const Parts = () => {
                     status: partData.status === "A" ? "active" : "inactive",
                   };
 
-                  // Add images if provided
-                  if (partData.imageP1) {
-                    apiData.image_p1 = partData.imageP1;
-                  }
-                  if (partData.imageP2) {
-                    apiData.image_p2 = partData.imageP2;
+                  // Handle images - if updating, explicitly set to null if not provided to clear them
+                  if (isEdit && editItemId) {
+                    // When updating, always include image fields (null if not provided to clear old images)
+                    apiData.image_p1 = partData.imageP1 !== undefined ? partData.imageP1 : null;
+                    apiData.image_p2 = partData.imageP2 !== undefined ? partData.imageP2 : null;
+                  } else {
+                    // When creating, only add if provided
+                    if (partData.imageP1) {
+                      apiData.image_p1 = partData.imageP1;
+                    }
+                    if (partData.imageP2) {
+                      apiData.image_p2 = partData.imageP2;
+                    }
                   }
 
                   let response;
@@ -590,9 +632,9 @@ const Parts = () => {
                       partNo: p.part_no,
                       brand: p.brand_name || "",
                       description: p.description || "",
-                      category: p.category_name || "",
-                      subCategory: p.subcategory_name || "",
-                      application: p.application_name || "",
+                      category: p.category_name || (p.category?.name) || "",
+                      subCategory: p.subcategory_name || (p.subcategory?.name) || "",
+                      application: p.application_name || (p.application?.name) || "",
                       status: p.status === "active" ? "Active" : "Inactive",
                       images: [p.image_p1, p.image_p2].filter(Boolean),
                     }));

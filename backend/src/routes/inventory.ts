@@ -11,6 +11,8 @@ router.get('/dashboard', async (req: Request, res: Response) => {
       activeParts,
       totalValue,
       categoriesCount,
+      activeKits,
+      suppliersCount,
     ] = await Promise.all([
       prisma.part.count(),
       prisma.part.count({ where: { status: 'active' } }),
@@ -23,6 +25,8 @@ router.get('/dashboard', async (req: Request, res: Response) => {
         },
       }),
       prisma.category.count({ where: { status: 'active' } }),
+      prisma.kit.count({ where: { status: 'Active' } }),
+      prisma.supplier.count({ where: { status: 'active' } }),
     ]);
 
     // Get total quantity from stock movements
@@ -232,6 +236,8 @@ router.get('/dashboard', async (req: Request, res: Response) => {
       totalValue: totalValue._sum.cost || 0,
       totalQty: totalQtyResult._sum.quantity || 0,
       categoriesCount,
+      activeKits,
+      suppliersCount,
       lowStock: lowStockCount,
       outOfStock: outOfStockCount,
       charts: {

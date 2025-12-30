@@ -153,11 +153,12 @@ export const PostExpenseTab = ({ onUpdate }: PostExpenseTabProps) => {
                 <SelectValue placeholder="Select Expense Type" />
               </SelectTrigger>
               <SelectContent>
-                {expenseTypes.map((type) => (
-                  <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>
-                ))}
-                {expenseTypes.length === 0 && (
-                  <SelectItem value="" disabled>No expense types available</SelectItem>
+                {expenseTypes.length > 0 ? (
+                  expenseTypes.map((type) => (
+                    <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>
+                  ))
+                ) : (
+                  <div className="px-2 py-1.5 text-sm text-muted-foreground">No expense types available</div>
                 )}
               </SelectContent>
             </Select>

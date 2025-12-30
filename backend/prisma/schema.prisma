@@ -98,6 +98,7 @@ model Part {
   stockMovements           StockMovement[]
   verificationItems        StockVerificationItem[]
   transferItems            TransferItem[]
+  kitItems                 KitItem[]
 }
 
 model Model {
@@ -438,20 +439,21 @@ model Subgroup {
 }
 
 model Account {
-  id             String        @id @default(uuid())
+  id             String         @id @default(uuid())
   subgroupId     String
-  code           String        @unique
+  code           String         @unique
   name           String
   description    String?
-  accountType    String        @default("regular")
-  openingBalance Float         @default(0)
-  currentBalance Float         @default(0)
-  status         String        @default("Active")
-  canDelete      Boolean       @default(true)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  subgroup       Subgroup      @relation(fields: [subgroupId], references: [id], onDelete: Cascade)
+  accountType    String         @default("regular")
+  openingBalance Float          @default(0)
+  currentBalance Float          @default(0)
+  status         String         @default("Active")
+  canDelete      Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  subgroup       Subgroup       @relation(fields: [subgroupId], references: [id], onDelete: Cascade)
   journalLines   JournalLine[]
+  voucherEntries VoucherEntry[]
 }
 
 model JournalEntry {
@@ -606,9 +608,71 @@ model CompanyProfile {
 }
 
 model WhatsAppSettings {
-  id        String   @id @default(uuid())
-  appKey    String?
-  authKey   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                      String   @id @default(uuid())
+  appKey                  String?
+  authKey                 String?
+  administratorPhoneNumber String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+}
+
+model Kit {
+  id          String    @id @default(uuid())
+  badge       String    @unique
+  name        String
+  description String?
+  sellingPrice Float    @default(0)
+  totalCost   Float    @default(0)
+  itemsCount  Int       @default(0)
+  status      String    @default("Active")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  items       KitItem[]
+}
+
+model KitItem {
+  id          String   @id @default(uuid())
+  kitId       String
+  partId      String
+  partNo      String
+  partName    String
+  quantity    Int      @default(1)
+  costPerUnit Float
+  createdAt   DateTime @default(now())
+  kit         Kit      @relation(fields: [kitId], references: [id], onDelete: Cascade)
+  part        Part     @relation(fields: [partId], references: [id], onDelete: Restrict)
+}
+
+model Voucher {
+  id             String         @id @default(uuid())
+  voucherNumber  String         @unique
+  type           String         // receipt, payment, journal, contra
+  date           DateTime
+  narration      String?
+  cashBankAccount String?
+  chequeNumber   String?
+  chequeDate     DateTime?
+  totalDebit     Float          @default(0)
+  totalCredit    Float          @default(0)
+  status         String         @default("draft") // draft, posted, cancelled
+  createdBy      String?
+  approvedBy     String?
+  approvedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  entries        VoucherEntry[]
+}
+
+model VoucherEntry {
+  id          String   @id @default(uuid())
+  voucherId   String
+  accountId   String?
+  accountName String
+  description String?
+  debit       Float    @default(0)
+  credit      Float    @default(0)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  voucher     Voucher  @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  account     Account? @relation(fields: [accountId], references: [id])
 }

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { EditKitForm } from "./EditKitForm";
@@ -13,6 +13,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
+import { apiClient } from "@/lib/api";
+import { Loader2 } from "lucide-react";
 
 export interface KitItem {
   id: string;
@@ -40,19 +42,69 @@ interface KitsListProps {
   onBreakKit?: (kit: Kit) => void;
   onDelete?: (kit: Kit) => void;
   onUpdateKit?: (kit: Kit) => void;
+  refreshTrigger?: number;
 }
 
 export const KitsList = ({
-  kits = initialKits,
+  kits: propKits,
   onEdit,
   onBreakKit,
   onDelete,
   onUpdateKit,
+  refreshTrigger,
 }: KitsListProps) => {
+  const [kits, setKits] = useState<Kit[]>(propKits || []);
   const [searchQuery, setSearchQuery] = useState("");
   const [editingKit, setEditingKit] = useState<Kit | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [kitToDelete, setKitToDelete] = useState<Kit | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // Fetch kits from API
+  useEffect(() => {
+    fetchKits();
+  }, [refreshTrigger]);
+
+  // Update kits when propKits changes
+  useEffect(() => {
+    if (propKits) {
+      setKits(propKits);
+    }
+  }, [propKits]);
+
+  const fetchKits = async () => {
+    try {
+      setLoading(true);
+      const response = await apiClient.getKits({ limit: 1000 });
+      if (response.data && Array.isArray(response.data)) {
+        const transformedKits: Kit[] = response.data.map((k: any) => ({
+          id: k.id,
+          name: k.name,
+          badge: k.badge,
+          itemsCount: k.itemsCount,
+          totalCost: k.totalCost,
+          price: k.sellingPrice,
+          items: k.items?.map((item: any) => ({
+            id: item.id,
+            partNo: item.partNo,
+            partName: item.partName,
+            quantity: item.quantity,
+            cost: item.costPerUnit || item.cost,
+          })),
+        }));
+        setKits(transformedKits);
+      }
+    } catch (error) {
+      console.error('Error fetching kits:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch kits",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filteredKits = useMemo(() => {
     return kits.filter(
@@ -76,22 +128,37 @@ export const KitsList = ({
     setDeleteConfirmOpen(true);
   };
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = async () => {
     if (kitToDelete) {
-      onDelete?.(kitToDelete);
-      toast({
-        title: "Kit Deleted",
-        description: `"${kitToDelete.name}" has been deleted successfully.`,
-      });
+      try {
+        const response = await apiClient.deleteKit(kitToDelete.id);
+        if (response.error) {
+          throw new Error(response.error);
+        }
+        onDelete?.(kitToDelete);
+        await fetchKits(); // Refresh the list
+        toast({
+          title: "Kit Deleted",
+          description: `"${kitToDelete.name}" has been deleted successfully.`,
+        });
+      } catch (error: any) {
+        console.error('Error deleting kit:', error);
+        toast({
+          title: "Error",
+          description: error.message || "Failed to delete kit",
+          variant: "destructive",
+        });
+      }
     }
     setDeleteConfirmOpen(false);
     setKitToDelete(null);
     setEditingKit(null);
   };
 
-  const handleSaveKit = (updatedKit: Kit) => {
+  const handleSaveKit = async (updatedKit: Kit) => {
     onUpdateKit?.(updatedKit);
     setEditingKit(null);
+    await fetchKits(); // Refresh the list
   };
 
   const handleCancelEdit = () => {
@@ -129,7 +196,12 @@ export const KitsList = ({
       </div>
 
       <div className="p-4">
-        {filteredKits.length === 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-primary" />
+            <span className="ml-2 text-sm text-muted-foreground">Loading kits...</span>
+          </div>
+        ) : filteredKits.length === 0 ? (
           <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
             No kits found
           </div>

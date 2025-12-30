@@ -1590,9 +1590,48 @@ class ApiClient {
     });
   }
 
+  async downloadBackup(id: string) {
+    const response = await fetch(`${this.baseUrl}/backups/${id}/download`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    
+    const contentDisposition = response.headers.get('Content-Disposition');
+    const filename = contentDisposition 
+      ? contentDisposition.split('filename=')[1]?.replace(/"/g, '') 
+      : `backup_${id}.json`;
+    
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+
+    return { success: true };
+  }
+
   async deleteBackup(id: string) {
     return this.request(`/backups/${id}`, {
       method: 'DELETE',
+    });
+  }
+
+  async importBackup(backupData: any) {
+    return this.request('/backups/import', {
+      method: 'POST',
+      body: JSON.stringify(backupData),
     });
   }
 
@@ -1620,10 +1659,93 @@ class ApiClient {
   async updateWhatsAppSettings(data: {
     appKey?: string;
     authKey?: string;
+    administratorPhoneNumber?: string;
   }) {
     return this.request('/whatsapp-settings', {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  }
+
+  async sendWhatsAppMessage(data: {
+    to: string;
+    message?: string;
+    file?: string;
+    template_id?: string;
+    variables?: Record<string, string>;
+  }) {
+    return this.request('/whatsapp-settings/send-message', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Kits API
+  async getKits(params?: {
+    search?: string;
+    status?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const queryParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          queryParams.append(key, String(value));
+        }
+      });
+    }
+    const queryString = queryParams.toString();
+    return this.request(`/kits${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getKit(id: string) {
+    return this.request(`/kits/${id}`);
+  }
+
+  async createKit(data: {
+    badge: string;
+    name: string;
+    description?: string;
+    sellingPrice: number;
+    status?: string;
+    items: Array<{
+      partId: string;
+      partNo: string;
+      partName: string;
+      quantity: number;
+      costPerUnit: number;
+    }>;
+  }) {
+    return this.request('/kits', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateKit(id: string, data: {
+    badge?: string;
+    name?: string;
+    description?: string;
+    sellingPrice?: number;
+    status?: string;
+    items?: Array<{
+      partId: string;
+      partNo: string;
+      partName: string;
+      quantity: number;
+      costPerUnit: number;
+    }>;
+  }) {
+    return this.request(`/kits/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteKit(id: string) {
+    return this.request(`/kits/${id}`, {
+      method: 'DELETE',
     });
   }
 }

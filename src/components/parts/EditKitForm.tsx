@@ -3,9 +3,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Package, Trash2 } from "lucide-react";
+import { Plus, Package, Trash2, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Kit } from "./KitsList";
+import { apiClient } from "@/lib/api";
 
 interface KitItem {
   id: string;
@@ -23,23 +24,19 @@ interface KitFormData {
   description: string;
 }
 
+interface Part {
+  id: string;
+  partNo: string;
+  description: string;
+  cost: number;
+}
+
 interface EditKitFormProps {
   kit: Kit;
   onSave: (kit: Kit) => void;
   onDelete: (kit: Kit) => void;
   onCancel: () => void;
 }
-
-// Sample parts list for selection
-const availableParts = [
-  { id: "1", partNo: "P-001", name: "Engine Oil Filter", cost: 150.00 },
-  { id: "2", partNo: "P-002", name: "Air Filter", cost: 250.00 },
-  { id: "3", partNo: "P-003", name: "Brake Pad Set", cost: 1200.00 },
-  { id: "4", partNo: "P-004", name: "Spark Plug", cost: 80.00 },
-  { id: "5", partNo: "P-005", name: "Timing Belt", cost: 450.00 },
-  { id: "6", partNo: "P-006", name: "Fuel Filter", cost: 180.00 },
-  { id: "7", partNo: "P-007", name: "Coolant", cost: 300.00 },
-];
 
 export const EditKitForm = ({ kit, onSave, onDelete, onCancel }: EditKitFormProps) => {
   const [formData, setFormData] = useState<KitFormData>({
@@ -50,16 +47,79 @@ export const EditKitForm = ({ kit, onSave, onDelete, onCancel }: EditKitFormProp
     description: "",
   });
   const [kitItems, setKitItems] = useState<KitItem[]>([]);
+  const [availableParts, setAvailableParts] = useState<Part[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [partsLoading, setPartsLoading] = useState(false);
+  const [kitLoading, setKitLoading] = useState(false);
 
+  // Fetch parts and kit details from API
   useEffect(() => {
-    setFormData({
-      kitNumber: kit.badge || "",
-      kitName: kit.name,
-      sellingPrice: kit.price.toString(),
-      status: "Active",
-      description: "",
-    });
-  }, [kit]);
+    fetchParts();
+    fetchKitDetails();
+  }, [kit.id]);
+
+  const fetchParts = async () => {
+    try {
+      setPartsLoading(true);
+      const response = await apiClient.getParts({ status: 'active', limit: 1000 });
+      if (response.data && Array.isArray(response.data)) {
+        const parts: Part[] = response.data.map((p: any) => ({
+          id: p.id,
+          partNo: p.part_no || p.partNo,
+          description: p.description,
+          cost: p.cost || 0,
+        }));
+        setAvailableParts(parts);
+      }
+    } catch (error) {
+      console.error('Error fetching parts:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch parts",
+        variant: "destructive",
+      });
+    } finally {
+      setPartsLoading(false);
+    }
+  };
+
+  const fetchKitDetails = async () => {
+    try {
+      setKitLoading(true);
+      const response = await apiClient.getKit(kit.id);
+      if (response.data) {
+        const kitData = response.data;
+        setFormData({
+          kitNumber: kitData.badge || "",
+          kitName: kitData.name,
+          sellingPrice: kitData.sellingPrice?.toString() || "0",
+          status: kitData.status || "Active",
+          description: kitData.description || "",
+        });
+        
+        // Set kit items
+        if (kitData.items && Array.isArray(kitData.items)) {
+          const items: KitItem[] = kitData.items.map((item: any) => ({
+            id: item.id || Date.now().toString() + Math.random(),
+            partNo: item.partNo,
+            partName: item.partName,
+            quantity: item.quantity,
+            cost: item.costPerUnit || item.cost,
+          }));
+          setKitItems(items);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching kit details:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch kit details",
+        variant: "destructive",
+      });
+    } finally {
+      setKitLoading(false);
+    }
+  };
 
   const handleInputChange = (field: keyof KitFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -83,7 +143,7 @@ export const EditKitForm = ({ kit, onSave, onDelete, onCancel }: EditKitFormProp
       setKitItems((prev) =>
         prev.map((item) =>
           item.id === itemId
-            ? { ...item, partNo: selectedPart.partNo, partName: selectedPart.name, cost: selectedPart.cost }
+            ? { ...item, partNo: selectedPart.partNo, partName: selectedPart.description, cost: selectedPart.cost }
             : item
         )
       );
@@ -102,7 +162,7 @@ export const EditKitForm = ({ kit, onSave, onDelete, onCancel }: EditKitFormProp
     setKitItems((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formData.kitNumber.trim() || !formData.kitName.trim()) {
       toast({
         title: "Validation Error",
@@ -111,22 +171,89 @@ export const EditKitForm = ({ kit, onSave, onDelete, onCancel }: EditKitFormProp
       });
       return;
     }
-    
-    const updatedKit: Kit = {
-      ...kit,
-      name: formData.kitName,
-      badge: formData.kitNumber,
-      price: parseFloat(formData.sellingPrice) || 0,
-      itemsCount: kitItems.filter(item => item.partNo).length,
-      totalCost: kitItems.reduce((sum, item) => sum + (item.cost * item.quantity), 0),
-    };
-    
-    onSave(updatedKit);
-    toast({
-      title: "Success",
-      description: "Kit updated successfully",
-    });
+
+    const validItems = kitItems.filter(item => item.partNo && item.partName && item.quantity > 0);
+    if (validItems.length === 0) {
+      toast({
+        title: "Validation Error",
+        description: "At least one valid item is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Find part IDs for items
+      const itemsWithPartIds = validItems.map(item => {
+        const part = availableParts.find(p => p.partNo === item.partNo);
+        if (!part) {
+          throw new Error(`Part ${item.partNo} not found`);
+        }
+        return {
+          partId: part.id,
+          partNo: item.partNo,
+          partName: item.partName,
+          quantity: item.quantity,
+          costPerUnit: item.cost,
+        };
+      });
+
+      const response = await apiClient.updateKit(kit.id, {
+        badge: formData.kitNumber,
+        name: formData.kitName,
+        description: formData.description,
+        sellingPrice: parseFloat(formData.sellingPrice) || 0,
+        status: formData.status,
+        items: itemsWithPartIds,
+      });
+
+      if (response.error) {
+        throw new Error(response.error);
+      }
+
+      const updatedKit: Kit = {
+        id: response.data.id,
+        name: response.data.name,
+        badge: response.data.badge,
+        price: response.data.sellingPrice,
+        itemsCount: response.data.itemsCount,
+        totalCost: response.data.totalCost,
+        items: response.data.items?.map((item: any) => ({
+          id: item.id,
+          partNo: item.partNo,
+          partName: item.partName,
+          quantity: item.quantity,
+          cost: item.costPerUnit || item.cost,
+        })),
+      };
+      
+      onSave(updatedKit);
+      toast({
+        title: "Success",
+        description: "Kit updated successfully",
+      });
+    } catch (error: any) {
+      console.error('Error updating kit:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update kit",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
+
+  if (kitLoading) {
+    return (
+      <div className="bg-card rounded-xl border border-border p-4 md:p-6 h-full flex flex-col items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <p className="mt-4 text-sm text-muted-foreground">Loading kit details...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-card rounded-xl border border-border p-4 md:p-6 h-full flex flex-col">
@@ -249,14 +376,15 @@ export const EditKitForm = ({ kit, onSave, onDelete, onCancel }: EditKitFormProp
                       <Select 
                         value={availableParts.find(p => p.partNo === item.partNo)?.id || ""} 
                         onValueChange={(v) => handlePartSelect(item.id, v)}
+                        disabled={partsLoading}
                       >
                         <SelectTrigger className="h-9 text-sm w-full">
-                          <SelectValue placeholder="Select part" />
+                          <SelectValue placeholder={partsLoading ? "Loading parts..." : "Select part"} />
                         </SelectTrigger>
                         <SelectContent className="bg-popover">
                           {availableParts.map((part) => (
                             <SelectItem key={part.id} value={part.id}>
-                              {part.partNo} - {part.name} (Rs {part.cost.toFixed(2)})
+                              {part.partNo} - {part.description} (Rs {part.cost.toFixed(2)})
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -284,8 +412,15 @@ export const EditKitForm = ({ kit, onSave, onDelete, onCancel }: EditKitFormProp
 
       {/* Action Buttons */}
       <div className="flex flex-col sm:flex-row gap-2 mt-4 pt-4 border-t border-border">
-        <Button className="flex-1" onClick={handleSave}>
-          Update Kit
+        <Button className="flex-1" onClick={handleSave} disabled={loading}>
+          {loading ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Updating...
+            </>
+          ) : (
+            "Update Kit"
+          )}
         </Button>
         <Button 
           variant="outline" 

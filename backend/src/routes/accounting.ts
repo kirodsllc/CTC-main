@@ -3,6 +3,76 @@ import prisma from '../config/database';
 
 const router = express.Router();
 
+// ========== Helper Functions for Accounting Calculations ==========
+
+/**
+ * Determines if an account type has a normal DEBIT balance
+ * Assets and Expenses have normal DEBIT balances
+ */
+function isDebitNormal(accountType: string): boolean {
+  const type = accountType.toLowerCase();
+  return type === 'asset' || type === 'expense' || type === 'cost';
+}
+
+/**
+ * Calculates account balance based on account type and transactions
+ * For DEBIT normal accounts: balance = openingBalance + debits - credits
+ * For CREDIT normal accounts: balance = openingBalance + credits - debits
+ */
+function calculateAccountBalance(
+  openingBalance: number,
+  totalDebit: number,
+  totalCredit: number,
+  accountType: string
+): number {
+  if (isDebitNormal(accountType)) {
+    // Assets and Expenses: increase with debit, decrease with credit
+    return openingBalance + totalDebit - totalCredit;
+  } else {
+    // Liabilities, Equity, Revenue: increase with credit, decrease with debit
+    return openingBalance + totalCredit - totalDebit;
+  }
+}
+
+/**
+ * Calculates the balance change for posting journal entries
+ * For DEBIT normal: balanceChange = debit - credit
+ * For CREDIT normal: balanceChange = credit - debit
+ */
+function calculateBalanceChange(
+  debit: number,
+  credit: number,
+  accountType: string
+): number {
+  if (isDebitNormal(accountType)) {
+    return debit - credit;
+  } else {
+    return credit - debit;
+  }
+}
+
+/**
+ * Gets trial balance amounts (debit and credit columns)
+ * For DEBIT normal accounts: positive balance = debit, negative = credit
+ * For CREDIT normal accounts: positive balance = credit, negative = debit
+ */
+function getTrialBalanceAmounts(
+  balance: number,
+  accountType: string
+): { debit: number; credit: number } {
+  if (isDebitNormal(accountType)) {
+    return {
+      debit: balance > 0 ? balance : 0,
+      credit: balance < 0 ? Math.abs(balance) : 0,
+    };
+  } else {
+    return {
+      debit: balance < 0 ? Math.abs(balance) : 0,
+      credit: balance > 0 ? balance : 0,
+    };
+  }
+}
+
 // ========== Main Groups ==========
 router.get('/main-groups', async (req: Request, res: Response) => {
   try {
@@ -11,7 +81,11 @@ router.get('/main-groups', async (req: Request, res: Response) => {
     });
     res.json(groups);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('Error fetching main groups:', error);
+    res.status(500).json({ 
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
@@ -271,7 +345,21 @@ router.post('/journal-entries/:id/post', async (req: Request, res: Response) => 
     
     const entry = await prisma.journalEntry.findUnique({
       where: { id },
-      include: { lines: true },
+      include: {
+        lines: {
+          include: {
+            account: {
+              include: {
+                subgroup: {
+                  include: {
+                    mainGroup: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     });
     
     if (!entry) {
@@ -293,15 +381,29 @@ router.post('/journal-entries/:id/post', async (req: Request, res: Response) => 
       include: {
         lines: {
           include: {
-            account: true,
+            account: {
+              include: {
+                subgroup: {
+                  include: {
+                    mainGroup: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
     });
     
-    // Update account balances
+    // Update account balances using proper accounting logic
     for (const line of entry.lines) {
-      const balanceChange = line.debit - line.credit;
+      const accountType = line.account.subgroup.mainGroup.type;
+      const balanceChange = calculateBalanceChange(
+        line.debit,
+        line.credit,
+        accountType
+      );
+      
       await prisma.account.update({
         where: { id: line.accountId },
         data: {
@@ -356,11 +458,19 @@ router.get('/general-ledger', async (req: Request, res: Response) => {
       },
     });
     
-    // Calculate running balances
+    // Calculate running balances using proper accounting logic
     const ledgerAccounts = accounts.map((account) => {
+      const accountType = account.subgroup.mainGroup.type;
       let runningBalance = account.openingBalance;
+      
       const transactions = account.journalLines.map((line) => {
-        runningBalance += line.debit - line.credit;
+        const balanceChange = calculateBalanceChange(
+          line.debit,
+          line.credit,
+          accountType
+        );
+        runningBalance += balanceChange;
+        
         return {
           id: line.id,
           date: line.journalEntry.entryDate.toISOString().split('T')[0],
@@ -376,7 +486,7 @@ router.get('/general-ledger', async (req: Request, res: Response) => {
       return {
         code: account.code,
         name: account.name,
-        type: account.subgroup.mainGroup.type,
+        type: accountType,
         openingBalance: account.openingBalance,
         currentBalance: runningBalance,
         transactions,
@@ -410,18 +520,31 @@ router.get('/trial-balance', async (req: Request, res: Response) => {
     });
     
     const trialBalance = accounts.map((account) => {
+      const accountType = account.subgroup.mainGroup.type;
       const totalDebit = account.journalLines.reduce((sum, line) => sum + line.debit, 0);
       const totalCredit = account.journalLines.reduce((sum, line) => sum + line.credit, 0);
-      const balance = account.openingBalance + totalDebit - totalCredit;
+      
+      // Calculate balance using proper accounting logic
+      const balance = calculateAccountBalance(
+        account.openingBalance,
+        totalDebit,
+        totalCredit,
+        accountType
+      );
+      
+      // Get trial balance amounts (debit/credit columns)
+      const { debit, credit } = getTrialBalanceAmounts(balance, accountType);
       
       return {
         accountCode: account.code,
         accountName: account.name,
-        accountType: account.subgroup.mainGroup.type,
-        debit: balance > 0 ? balance : 0,
-        credit: balance < 0 ? Math.abs(balance) : 0,
+        accountType: accountType,
+        debit,
+        credit,
       };
     }).filter((row) => {
+      // Only show accounts with non-zero balances
+      if (row.debit === 0 && row.credit === 0) return false;
       if (type && type !== 'all') {
         return row.accountType.toLowerCase() === (type as string).toLowerCase();
       }
@@ -487,17 +610,28 @@ router.get('/income-statement', async (req: Request, res: Response) => {
     const revenueCategories: any[] = [];
     const expenseCategories: any[] = [];
     
-    // Process revenues
+    // Process revenues (Revenue accounts: normal balance is CREDIT)
+    // Revenue = openingBalance + credits - debits
     const revenueBySubgroup: Record<string, any[]> = {};
     revenueAccounts.forEach((account) => {
       const subGroupName = account.subgroup.name;
       if (!revenueBySubgroup[subGroupName]) {
         revenueBySubgroup[subGroupName] = [];
       }
+      const totalDebit = account.journalLines.reduce((sum, line) => sum + line.debit, 0);
       const totalCredit = account.journalLines.reduce((sum, line) => sum + line.credit, 0);
+      
+      // Revenue balance: openingBalance + credits - debits
+      const revenueAmount = calculateAccountBalance(
+        account.openingBalance,
+        totalDebit,
+        totalCredit,
+        'revenue'
+      );
+      
       revenueBySubgroup[subGroupName].push({
         name: account.name,
-        amount: totalCredit,
+        amount: revenueAmount > 0 ? revenueAmount : 0,
       });
     });
     
@@ -505,7 +639,8 @@ router.get('/income-statement', async (req: Request, res: Response) => {
       revenueCategories.push({ name, items });
     });
     
-    // Process expenses
+    // Process expenses (Expense accounts: normal balance is DEBIT)
+    // Expense = openingBalance + debits - credits
     const expenseBySubgroup: Record<string, any[]> = {};
     expenseAccounts.forEach((account) => {
       const subGroupName = account.subgroup.name;
@@ -513,9 +648,19 @@ router.get('/income-statement', async (req: Request, res: Response) => {
         expenseBySubgroup[subGroupName] = [];
       }
       const totalDebit = account.journalLines.reduce((sum, line) => sum + line.debit, 0);
+      const totalCredit = account.journalLines.reduce((sum, line) => sum + line.credit, 0);
+      
+      // Expense balance: openingBalance + debits - credits
+      const expenseAmount = calculateAccountBalance(
+        account.openingBalance,
+        totalDebit,
+        totalCredit,
+        'expense'
+      );
+      
       expenseBySubgroup[subGroupName].push({
         name: account.name,
-        amount: totalDebit,
+        amount: expenseAmount > 0 ? expenseAmount : 0,
       });
     });
     
@@ -524,6 +669,56 @@ router.get('/income-statement', async (req: Request, res: Response) => {
     });
     
     res.json({ revenue: revenueCategories, expenses: expenseCategories });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ========== Recalculate All Account Balances ==========
+router.post('/recalculate-balances', async (req: Request, res: Response) => {
+  try {
+    const accounts = await prisma.account.findMany({
+      include: {
+        subgroup: {
+          include: {
+            mainGroup: true,
+          },
+        },
+        journalLines: {
+          where: {
+            journalEntry: {
+              status: 'posted',
+            },
+          },
+        },
+      },
+    });
+
+    // Recalculate all account balances from scratch
+    for (const account of accounts) {
+      const accountType = account.subgroup.mainGroup.type;
+      const totalDebit = account.journalLines.reduce((sum, line) => sum + line.debit, 0);
+      const totalCredit = account.journalLines.reduce((sum, line) => sum + line.credit, 0);
+      
+      const calculatedBalance = calculateAccountBalance(
+        account.openingBalance,
+        totalDebit,
+        totalCredit,
+        accountType
+      );
+
+      await prisma.account.update({
+        where: { id: account.id },
+        data: {
+          currentBalance: calculatedBalance,
+        },
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: `Recalculated balances for ${accounts.length} accounts` 
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -599,8 +794,8 @@ router.get('/balance-sheet', async (req: Request, res: Response) => {
       },
     });
     
-    // Group by main group or subgroup
-    const processAccounts = (accounts: any[]) => {
+    // Group by main group or subgroup with proper balance calculations
+    const processAccounts = (accounts: any[], accountType: string) => {
       const byCategory: Record<string, any[]> = {};
       accounts.forEach((account) => {
         const categoryName = account.subgroup.mainGroup.name;
@@ -609,19 +804,30 @@ router.get('/balance-sheet', async (req: Request, res: Response) => {
         }
         const totalDebit = account.journalLines.reduce((sum: number, line: any) => sum + line.debit, 0);
         const totalCredit = account.journalLines.reduce((sum: number, line: any) => sum + line.credit, 0);
-        const balance = account.openingBalance + totalDebit - totalCredit;
+        
+        // Calculate balance using proper accounting logic
+        const balance = calculateAccountBalance(
+          account.openingBalance,
+          totalDebit,
+          totalCredit,
+          accountType
+        );
+        
+        // For balance sheet, show absolute value (assets are positive, liabilities/equity shown as positive)
+        const displayAmount = accountType === 'asset' ? balance : Math.abs(balance);
+        
         byCategory[categoryName].push({
           name: account.name,
-          amount: balance,
+          amount: displayAmount,
         });
       });
       return Object.entries(byCategory).map(([name, items]) => ({ name, items }));
     };
     
     res.json({
-      assets: processAccounts(assetAccounts),
-      liabilities: processAccounts(liabilityAccounts),
-      equity: processAccounts(equityAccounts),
+      assets: processAccounts(assetAccounts, 'asset'),
+      liabilities: processAccounts(liabilityAccounts, 'liability'),
+      equity: processAccounts(equityAccounts, 'equity'),
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

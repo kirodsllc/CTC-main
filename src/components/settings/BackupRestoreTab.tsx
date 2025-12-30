@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,7 +38,8 @@ import {
   RotateCcw,
   Archive,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  Upload
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
@@ -117,32 +118,54 @@ export const BackupRestoreTab = () => {
     }
   }, [activeSubTab]);
 
+  const backupsRef = useRef<Backup[]>([]);
+  backupsRef.current = backups;
+
   // Real-time polling for in-progress backups
   useEffect(() => {
-    const hasInProgress = backups.some(b => b.status === "in_progress");
+    const checkAndPoll = () => {
+      const hasInProgress = backupsRef.current.some(b => b.status === "in_progress");
+      return hasInProgress;
+    };
+
+    if (!checkAndPoll()) return;
     
-    if (hasInProgress) {
-      const interval = setInterval(async () => {
-        await fetchBackups();
-        
-        // Check if any backup completed
+    const interval = setInterval(async () => {
+      if (!checkAndPoll()) {
+        clearInterval(interval);
+        return;
+      }
+      
+      try {
         const response = await apiClient.getBackups();
         if (response.data) {
           const updatedBackups = response.data as Backup[];
-          const completedBackup = updatedBackups.find(
-            b => b.status === "completed" && 
-            backups.find(ob => ob.id === b.id && ob.status === "in_progress")
+          const previousBackups = backupsRef.current;
+          
+          // Check for newly completed backups
+          const newlyCompleted = updatedBackups.filter(
+            b => {
+              const prev = previousBackups.find(pb => pb.id === b.id);
+              return b.status === "completed" && prev && prev.status === "in_progress";
+            }
           );
           
-          if (completedBackup) {
-            toast.success(`Backup "${completedBackup.name}" completed successfully!`);
+          setBackups(updatedBackups);
+          backupsRef.current = updatedBackups;
+          
+          if (newlyCompleted.length > 0) {
+            newlyCompleted.forEach(backup => {
+              toast.success(`Backup "${backup.name}" completed successfully!`);
+            });
           }
         }
-      }, 500); // Poll every 500ms for faster updates
-      
-      return () => clearInterval(interval);
-    }
-  }, [backups]);
+      } catch (error) {
+        // Ignore errors during polling
+      }
+    }, 500); // Poll every 500ms for faster updates
+    
+    return () => clearInterval(interval);
+  }, [backups.length]);
 
   // Calculate storage used from completed backups
   const calculateStorageUsed = () => {
@@ -190,34 +213,61 @@ export const BackupRestoreTab = () => {
     }
   };
 
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+
   const handleRestore = async (backup: Backup) => {
-    if (!confirm(`Are you sure you want to restore from ${backup.name}? This will overwrite current data.`)) return;
+    if (!confirm(`⚠️ WARNING: Are you sure you want to restore from "${backup.name}"?\n\nThis will overwrite all current data with the backup data. This action cannot be undone.`)) return;
     
     try {
+      setRestoringId(backup.id);
+      toast.loading(`Restoring from backup: ${backup.name}...`, { id: 'restore' });
+      
       const response = await apiClient.restoreBackup(backup.id);
       if (response.error) {
-        toast.error(response.error);
+        toast.error(response.error, { id: 'restore' });
+        setRestoringId(null);
       } else {
-        toast.success(`Restoring from: ${backup.name}`);
+        toast.success(`✅ Successfully restored from: ${backup.name}`, { id: 'restore' });
+        setRestoringId(null);
+        // Refresh backups after restore
+        setTimeout(() => fetchBackups(), 1000);
       }
     } catch (error: any) {
-      toast.error(error.message || "Failed to restore backup");
+      toast.error(error.message || "Failed to restore backup", { id: 'restore' });
+      setRestoringId(null);
+    }
+  };
+
+  const handleDownload = async (backup: Backup) => {
+    try {
+      toast.loading(`Preparing download for: ${backup.name}...`, { id: 'download' });
+      
+      const response = await apiClient.downloadBackup(backup.id);
+      if (response.error) {
+        toast.error(response.error, { id: 'download' });
+      } else {
+        toast.success(`✅ Backup "${backup.name}" downloaded successfully`, { id: 'download' });
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to download backup", { id: 'download' });
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this backup?")) return;
+    const backup = backups.find(b => b.id === id);
+    if (!confirm(`⚠️ Are you sure you want to delete "${backup?.name || 'this backup'}"?\n\nThis action cannot be undone.`)) return;
     
     try {
+      toast.loading("Deleting backup...", { id: 'delete' });
       const response = await apiClient.deleteBackup(id);
       if (response.error) {
-        toast.error(response.error);
+        toast.error(response.error, { id: 'delete' });
       } else {
-        toast.success("Backup deleted");
+        toast.success("✅ Backup deleted successfully", { id: 'delete' });
         fetchBackups();
       }
     } catch (error: any) {
-      toast.error(error.message || "Failed to delete backup");
+      toast.error(error.message || "Failed to delete backup", { id: 'delete' });
     }
   };
 
@@ -246,6 +296,58 @@ export const BackupRestoreTab = () => {
     a.click();
     URL.revokeObjectURL(url);
     toast.success("Backups exported successfully");
+  };
+
+  const handleImportBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.name.endsWith('.json')) {
+      toast.error("Please select a valid backup JSON file");
+      return;
+    }
+
+    try {
+      toast.loading("Reading backup file...", { id: 'import' });
+      
+      const fileContent = await file.text();
+      const backupData = JSON.parse(fileContent);
+
+      // Validate backup data structure
+      if (!backupData.name || !backupData.type) {
+        toast.error("Invalid backup file format", { id: 'import' });
+        return;
+      }
+
+      // Show confirmation dialog
+      if (!confirm(`⚠️ WARNING: Are you sure you want to import and restore from "${backupData.name}"?\n\nThis will overwrite all current data with the backup data. This action cannot be undone.`)) {
+        toast.dismiss('import');
+        return;
+      }
+
+      toast.loading(`Importing and restoring from: ${backupData.name}...`, { id: 'import' });
+
+      // Call import endpoint
+      const response = await apiClient.importBackup(backupData);
+      
+      if (response.error) {
+        toast.error(response.error, { id: 'import' });
+      } else {
+        toast.success(`✅ Successfully imported and restored from: ${backupData.name}`, { id: 'import' });
+        // Refresh backups after import
+        setTimeout(() => fetchBackups(), 1000);
+      }
+    } catch (error: any) {
+      if (error instanceof SyntaxError) {
+        toast.error("Invalid JSON file format", { id: 'import' });
+      } else {
+        toast.error(error.message || "Failed to import backup", { id: 'import' });
+      }
+    } finally {
+      // Reset file input
+      event.target.value = '';
+    }
   };
 
   return (
@@ -314,6 +416,23 @@ export const BackupRestoreTab = () => {
               <Download className="w-4 h-4" />
               Export CSV
             </Button>
+            <div className="relative">
+              <input
+                id="import-backup-file"
+                type="file"
+                accept=".json"
+                className="hidden"
+                onChange={handleImportBackup}
+              />
+              <Button 
+                variant="outline" 
+                className="gap-2" 
+                onClick={() => document.getElementById('import-backup-file')?.click()}
+              >
+                <Upload className="w-4 h-4" />
+                Import Backup
+              </Button>
+            </div>
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
               <DialogTrigger asChild>
                 <Button className="gap-2">
@@ -467,10 +586,29 @@ export const BackupRestoreTab = () => {
                       <div className="flex items-center justify-end gap-2">
                         {backup.status === "completed" && (
                           <>
-                            <Button variant="outline" size="sm" onClick={() => handleRestore(backup)}>
-                              Restore
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => handleRestore(backup)}
+                              disabled={restoringId !== null}
+                              title="Restore from this backup"
+                            >
+                              {restoringId === backup.id ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                  Restoring...
+                                </>
+                              ) : (
+                                "Restore"
+                              )}
                             </Button>
-                            <Button variant="ghost" size="icon" title="Download backup">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => handleDownload(backup)}
+                              disabled={restoringId !== null}
+                              title="Download backup"
+                            >
                               <Download className="w-4 h-4" />
                             </Button>
                           </>

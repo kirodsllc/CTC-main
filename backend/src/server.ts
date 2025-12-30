@@ -17,6 +17,7 @@ import approvalFlowsRoutes from './routes/approval-flows';
 import backupsRoutes from './routes/backups';
 import companyProfileRoutes from './routes/company-profile';
 import whatsappSettingsRoutes from './routes/whatsapp-settings';
+import kitsRoutes from './routes/kits';
 
 dotenv.config();
 
@@ -73,6 +74,7 @@ app.use('/api/approval-flows', approvalFlowsRoutes);
 app.use('/api/backups', backupsRoutes);
 app.use('/api/company-profile', companyProfileRoutes);
 app.use('/api/whatsapp-settings', whatsappSettingsRoutes);
+app.use('/api/kits', kitsRoutes);
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

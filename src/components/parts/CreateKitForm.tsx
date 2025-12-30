@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Package, Trash2 } from "lucide-react";
+import { Plus, Package, Trash2, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { apiClient } from "@/lib/api";
 
 interface KitItem {
   id: string;
@@ -22,6 +23,13 @@ interface KitFormData {
   description: string;
 }
 
+interface Part {
+  id: string;
+  partNo: string;
+  description: string;
+  cost: number;
+}
+
 const initialFormData: KitFormData = {
   kitNumber: "KIT-001",
   kitName: "",
@@ -30,24 +38,46 @@ const initialFormData: KitFormData = {
   description: "",
 };
 
-// Sample parts list for selection
-const availableParts = [
-  { id: "1", partNo: "P-001", name: "Engine Oil Filter", cost: 150.00 },
-  { id: "2", partNo: "P-002", name: "Air Filter", cost: 250.00 },
-  { id: "3", partNo: "P-003", name: "Brake Pad Set", cost: 1200.00 },
-  { id: "4", partNo: "P-004", name: "Spark Plug", cost: 80.00 },
-  { id: "5", partNo: "P-005", name: "Timing Belt", cost: 450.00 },
-  { id: "6", partNo: "P-006", name: "Fuel Filter", cost: 180.00 },
-  { id: "7", partNo: "P-007", name: "Coolant", cost: 300.00 },
-];
-
 interface CreateKitFormProps {
-  onSave: (kit: KitFormData & { items: KitItem[] }) => void;
+  onSave: (kit: any) => void;
 }
 
 export const CreateKitForm = ({ onSave }: CreateKitFormProps) => {
   const [formData, setFormData] = useState<KitFormData>(initialFormData);
   const [kitItems, setKitItems] = useState<KitItem[]>([]);
+  const [availableParts, setAvailableParts] = useState<Part[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [partsLoading, setPartsLoading] = useState(false);
+
+  // Fetch parts from API
+  useEffect(() => {
+    fetchParts();
+  }, []);
+
+  const fetchParts = async () => {
+    try {
+      setPartsLoading(true);
+      const response = await apiClient.getParts({ status: 'active', limit: 1000 });
+      if (response.data && Array.isArray(response.data)) {
+        const parts: Part[] = response.data.map((p: any) => ({
+          id: p.id,
+          partNo: p.part_no || p.partNo,
+          description: p.description,
+          cost: p.cost || 0,
+        }));
+        setAvailableParts(parts);
+      }
+    } catch (error) {
+      console.error('Error fetching parts:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch parts",
+        variant: "destructive",
+      });
+    } finally {
+      setPartsLoading(false);
+    }
+  };
 
   const handleInputChange = (field: keyof KitFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -71,7 +101,7 @@ export const CreateKitForm = ({ onSave }: CreateKitFormProps) => {
       setKitItems((prev) =>
         prev.map((item) =>
           item.id === itemId
-            ? { ...item, partNo: selectedPart.partNo, partName: selectedPart.name, cost: selectedPart.cost }
+            ? { ...item, partNo: selectedPart.partNo, partName: selectedPart.description, cost: selectedPart.cost }
             : item
         )
       );
@@ -90,7 +120,7 @@ export const CreateKitForm = ({ onSave }: CreateKitFormProps) => {
     setKitItems((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formData.kitNumber.trim() || !formData.kitName.trim()) {
       toast({
         title: "Validation Error",
@@ -99,13 +129,65 @@ export const CreateKitForm = ({ onSave }: CreateKitFormProps) => {
       });
       return;
     }
-    onSave({ ...formData, items: kitItems.filter(item => item.partNo) });
-    setFormData(initialFormData);
-    setKitItems([]);
-    toast({
-      title: "Success",
-      description: "Kit created successfully",
-    });
+
+    const validItems = kitItems.filter(item => item.partNo && item.partName && item.quantity > 0);
+    if (validItems.length === 0) {
+      toast({
+        title: "Validation Error",
+        description: "At least one valid item is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Find part IDs for items
+      const itemsWithPartIds = validItems.map(item => {
+        const part = availableParts.find(p => p.partNo === item.partNo);
+        if (!part) {
+          throw new Error(`Part ${item.partNo} not found`);
+        }
+        return {
+          partId: part.id,
+          partNo: item.partNo,
+          partName: item.partName,
+          quantity: item.quantity,
+          costPerUnit: item.cost,
+        };
+      });
+
+      const response = await apiClient.createKit({
+        badge: formData.kitNumber,
+        name: formData.kitName,
+        description: formData.description,
+        sellingPrice: parseFloat(formData.sellingPrice) || 0,
+        status: formData.status,
+        items: itemsWithPartIds,
+      });
+
+      if (response.error) {
+        throw new Error(response.error);
+      }
+
+      onSave(response.data);
+      setFormData(initialFormData);
+      setKitItems([]);
+      toast({
+        title: "Success",
+        description: "Kit created successfully",
+      });
+    } catch (error: any) {
+      console.error('Error creating kit:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create kit",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -229,14 +311,15 @@ export const CreateKitForm = ({ onSave }: CreateKitFormProps) => {
                       <Select 
                         value={availableParts.find(p => p.partNo === item.partNo)?.id || ""} 
                         onValueChange={(v) => handlePartSelect(item.id, v)}
+                        disabled={partsLoading}
                       >
                         <SelectTrigger className="h-9 text-sm w-full">
-                          <SelectValue placeholder="Select part" />
+                          <SelectValue placeholder={partsLoading ? "Loading parts..." : "Select part"} />
                         </SelectTrigger>
                         <SelectContent className="bg-popover">
                           {availableParts.map((part) => (
                             <SelectItem key={part.id} value={part.id}>
-                              {part.partNo} - {part.name} (Rs {part.cost.toFixed(2)})
+                              {part.partNo} - {part.description} (Rs {part.cost.toFixed(2)})
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -262,8 +345,15 @@ export const CreateKitForm = ({ onSave }: CreateKitFormProps) => {
         </div>
       </div>
 
-      <Button className="w-full mt-4" onClick={handleSave}>
-        Create Kit
+      <Button className="w-full mt-4" onClick={handleSave} disabled={loading}>
+        {loading ? (
+          <>
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            Creating...
+          </>
+        ) : (
+          "Create Kit"
+        )}
       </Button>
     </div>
   );

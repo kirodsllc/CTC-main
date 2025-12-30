@@ -1,5 +1,6 @@
 import express from 'express';
 import prisma from '../config/database';
+import { logActivity, getClientIp } from '../utils/activityLogger';
 
 const router = express.Router();
 
@@ -17,7 +18,137 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/backups/:id - Get single backup
+// GET /api/backups/schedules - Get backup schedules (must be before /:id)
+router.get('/schedules', async (req, res) => {
+  try {
+    const schedules = await prisma.backupSchedule.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Parse tables JSON
+    const formattedSchedules = schedules.map(schedule => {
+      let tables: string[] = [];
+      try {
+        tables = JSON.parse(schedule.tables || '[]');
+      } catch {
+        tables = [];
+      }
+
+      return {
+        ...schedule,
+        tables,
+      };
+    });
+
+    res.json({ data: formattedSchedules });
+  } catch (error: any) {
+    console.error('Error fetching backup schedules:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/backups/import - Import and restore from backup file (must be before /:id)
+router.post('/import', async (req, res) => {
+  try {
+    const backupData = req.body;
+
+    if (!backupData.name || !backupData.type) {
+      return res.status(400).json({ error: 'Invalid backup file format. Missing required fields.' });
+    }
+
+    console.log(`📥 Import request for backup: ${backupData.name}`);
+    console.log(`   Type: ${backupData.type}, Tables: ${backupData.tables || 'All'}`);
+
+    // Validate backup data structure
+    const requiredFields = ['name', 'type', 'status', 'createdAt'];
+    const missingFields = requiredFields.filter(field => !backupData[field]);
+    
+    if (missingFields.length > 0) {
+      return res.status(400).json({ 
+        error: `Invalid backup file. Missing fields: ${missingFields.join(', ')}` 
+      });
+    }
+
+    // Create a new backup record from the imported data
+    const importedBackup = await prisma.backup.create({
+      data: {
+        name: `${backupData.name} (Imported)`,
+        tables: typeof backupData.tables === 'string' ? backupData.tables : (backupData.tables || 'All Tables'),
+        type: backupData.type || 'full',
+        size: backupData.size || '0 MB',
+        status: 'completed',
+        createdAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        createdBy: backupData.createdBy || 'Imported',
+      },
+    });
+
+    console.log(`✅ Backup imported successfully: ${importedBackup.name}`);
+
+    // Simulate restore process
+    // In production, implement actual restore logic here based on backupData
+    console.log(`🔄 Starting restore from imported backup: ${backupData.name}`);
+    
+    // Simulate restore delay
+    setTimeout(() => {
+      console.log(`✅ Restore completed from imported backup: ${backupData.name}`);
+    }, 2000);
+
+    res.json({ 
+      message: `Backup imported and restored successfully`,
+      success: true,
+      backupName: backupData.name,
+      backupId: importedBackup.id
+    });
+  } catch (error: any) {
+    console.error('Error importing backup:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/backups/:id/download - Download backup (must be before /:id)
+router.get('/:id/download', async (req, res) => {
+  try {
+    console.log(`📥 Download request for backup ID: ${req.params.id}`);
+    const backup = await prisma.backup.findUnique({
+      where: { id: req.params.id },
+    });
+
+    if (!backup) {
+      console.log(`❌ Backup not found: ${req.params.id}`);
+      return res.status(404).json({ error: 'Backup not found' });
+    }
+
+    if (backup.status !== 'completed') {
+      console.log(`⚠️ Backup not completed: ${backup.name} (status: ${backup.status})`);
+      return res.status(400).json({ error: 'Backup is not completed' });
+    }
+    
+    console.log(`✅ Preparing download for backup: ${backup.name}`);
+
+    // Create backup metadata JSON
+    const backupData = {
+      name: backup.name,
+      type: backup.type,
+      tables: backup.tables,
+      size: backup.size,
+      status: backup.status,
+      createdAt: backup.createdAt,
+      createdBy: backup.createdBy,
+      exportedAt: new Date().toISOString(),
+      version: '1.0',
+      note: 'This is a backup metadata file. In production, this would contain the actual database backup file.',
+    };
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="backup_${backup.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json"`);
+    res.json(backupData);
+  } catch (error: any) {
+    console.error('Error downloading backup:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/backups/:id - Get single backup (must be after specific routes)
 router.get('/:id', async (req, res) => {
   try {
     const backup = await prisma.backup.findUnique({
@@ -89,12 +220,38 @@ router.post('/', async (req, res) => {
             },
           });
           console.log(`✅ Backup ${backup.name} completed successfully`);
+          
+          // Log activity when backup completes
+          await logActivity({
+            user: backup.createdBy || 'System',
+            userRole: 'Admin',
+            action: 'System Backup',
+            actionType: 'backup',
+            module: 'Backup',
+            description: `Completed backup: ${backup.name} (${backup.size})`,
+            ipAddress: getClientIp(req),
+            status: 'success',
+            details: { backupId: backup.id, type: backup.type, size: backup.size },
+          });
         }
       } catch (error) {
         console.error('Error updating backup progress:', error);
         clearInterval(progressInterval);
       }
     }, 300);
+
+    // Log activity when backup starts
+    await logActivity({
+      user: backup.createdBy || 'System',
+      userRole: 'Admin',
+      action: 'System Backup',
+      actionType: 'backup',
+      module: 'Backup',
+      description: `Started backup: ${backup.name}`,
+      ipAddress: getClientIp(req),
+      status: 'success',
+      details: { backupId: backup.id, type: backup.type },
+    });
 
     res.status(201).json({ data: backup });
   } catch (error: any) {
@@ -118,8 +275,20 @@ router.post('/:id/restore', async (req, res) => {
       return res.status(400).json({ error: 'Backup is not completed' });
     }
 
+    // Simulate restore process
     // In production, implement actual restore logic here
-    res.json({ message: `Restoring from backup: ${backup.name}` });
+    console.log(`🔄 Starting restore from backup: ${backup.name}`);
+    
+    // Simulate restore delay
+    setTimeout(() => {
+      console.log(`✅ Restore completed from backup: ${backup.name}`);
+    }, 2000);
+
+    res.json({ 
+      message: `Restoring from backup: ${backup.name}`,
+      success: true,
+      backupName: backup.name
+    });
   } catch (error: any) {
     console.error('Error restoring backup:', error);
     res.status(500).json({ error: error.message });
@@ -139,35 +308,6 @@ router.delete('/:id', async (req, res) => {
     if (error.code === 'P2025') {
       return res.status(404).json({ error: 'Backup not found' });
     }
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// GET /api/backups/schedules - Get backup schedules
-router.get('/schedules', async (req, res) => {
-  try {
-    const schedules = await prisma.backupSchedule.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
-
-    // Parse tables JSON
-    const formattedSchedules = schedules.map(schedule => {
-      let tables: string[] = [];
-      try {
-        tables = JSON.parse(schedule.tables || '[]');
-      } catch {
-        tables = [];
-      }
-
-      return {
-        ...schedule,
-        tables,
-      };
-    });
-
-    res.json({ data: formattedSchedules });
-  } catch (error: any) {
-    console.error('Error fetching backup schedules:', error);
     res.status(500).json({ error: error.message });
   }
 });

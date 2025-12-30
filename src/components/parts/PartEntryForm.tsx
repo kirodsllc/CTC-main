@@ -82,27 +82,92 @@ export const PartEntryForm = ({ onSave, selectedPart, onClearSelection }: PartEn
   // Populate form when a part is selected (only on new selection, not re-renders)
   useEffect(() => {
     if (selectedPart && selectedPart.id !== prevSelectedPartId.current) {
-      setFormData({
-        ...initialFormData,
-        partNo: selectedPart.partNo,
-        brand: selectedPart.brand || "",
-        uom: selectedPart.uom || "NOS",
-        cost: selectedPart.cost?.toString() || "0.00",
-        priceA: selectedPart.price?.toString() || "0.00",
-      });
-      // Set sample model quantities for the selected part
-      setModelQuantities([
-        { id: "1", model: selectedPart.brand || "Model 1", qty: Math.floor(Math.random() * 10) + 1 },
-        { id: "2", model: "Model 2", qty: Math.floor(Math.random() * 5) + 1 },
-      ]);
-      setIsEditing(true);
-      prevSelectedPartId.current = selectedPart.id;
-      toast({
-        title: "Part Selected",
-        description: `Loaded details for part "${selectedPart.partNo}"`,
-      });
+      // Fetch full part data including images
+      const loadPartData = async () => {
+        try {
+          const { apiClient } = await import("@/lib/api");
+          const response = await apiClient.getPart(selectedPart.id);
+          // Handle both response.data and direct response
+          const part = response.data || response;
+          if (part && part.id) {
+            setFormData({
+              ...initialFormData,
+              masterPartNo: part.master_part_no || "",
+              partNo: part.part_no || selectedPart.partNo,
+              brand: part.brand_name || selectedPart.brand || "",
+              uom: part.uom || selectedPart.uom || "NOS",
+              cost: part.cost?.toString() || selectedPart.cost?.toString() || "0.00",
+              priceA: part.price_a?.toString() || selectedPart.price?.toString() || "0.00",
+              priceB: part.price_b?.toString() || "0.00",
+              priceM: part.price_m?.toString() || "0.00",
+              description: part.description || "",
+              category: part.category_name || "",
+              subCategory: part.subcategory_name || "",
+              application: part.application_name || "",
+              hsCode: part.hs_code || "",
+              weight: part.weight?.toString() || "",
+              reOrderLevel: part.reorder_level?.toString() || "0",
+              smc: part.smc || "",
+              size: part.size || "",
+              status: part.status === "active" ? "A" : "N",
+              origin: part.origin || "",
+              grade: part.grade || "B",
+              remarks: part.remarks || "",
+            });
+            // Load images from the part
+            setImageP1(part.image_p1 || null);
+            setImageP2(part.image_p2 || null);
+            // Load models from the database
+            if (part.models && Array.isArray(part.models) && part.models.length > 0) {
+              setModelQuantities(
+                part.models.map((m: any, index: number) => ({
+                  id: m.id || `model-${index}`,
+                  model: m.name || "",
+                  qty: m.qty_used || m.qtyUsed || 0,
+                }))
+              );
+            } else {
+              // If no models, set default empty model
+              setModelQuantities([{ id: "1", model: "", qty: 0 }]);
+            }
+            setIsEditing(true);
+            prevSelectedPartId.current = selectedPart.id;
+            toast({
+              title: "Part Selected",
+              description: `Loaded details for part "${part.part_no || selectedPart.partNo}"`,
+            });
+          } else {
+            throw new Error("Invalid part data received");
+          }
+        } catch (error) {
+          console.error("Error loading part data:", error);
+          toast({
+            title: "Error",
+            description: "Failed to load part details. Please try again.",
+            variant: "destructive",
+          });
+          // Fallback to basic data if API call fails
+          setFormData({
+            ...initialFormData,
+            partNo: selectedPart.partNo,
+            brand: selectedPart.brand || "",
+            uom: selectedPart.uom || "NOS",
+            cost: selectedPart.cost?.toString() || "0.00",
+            priceA: selectedPart.price?.toString() || "0.00",
+          });
+          setImageP1(null);
+          setImageP2(null);
+          setModelQuantities([{ id: "1", model: "", qty: 0 }]);
+          setIsEditing(true);
+          prevSelectedPartId.current = selectedPart.id;
+        }
+      };
+      loadPartData();
     } else if (!selectedPart) {
       prevSelectedPartId.current = null;
+      setImageP1(null);
+      setImageP2(null);
+      setIsEditing(false);
     }
   }, [selectedPart]);
 
@@ -136,9 +201,12 @@ export const PartEntryForm = ({ onSave, selectedPart, onClearSelection }: PartEn
       });
       return;
     }
-    onSave({ ...formData, modelQuantities });
+    onSave({ ...formData, modelQuantities, imageP1, imageP2 });
     setFormData(initialFormData);
     setModelQuantities([{ id: "1", model: "", qty: 0 }]);
+    setImageP1(null);
+    setImageP2(null);
+    setIsEditing(false);
     toast({
       title: "Success",
       description: "Part saved successfully",

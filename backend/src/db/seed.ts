@@ -3,6 +3,7 @@ import prisma from '../config/database';
 async function seed() {
   try {
     console.log('🌱 Starting database seeding...');
+    const now = new Date();
 
     // Seed Categories
     const categories = [
@@ -45,26 +46,386 @@ async function seed() {
     const seededCategories = await prisma.category.findMany();
     const seededBrands = await prisma.brand.findMany();
 
-    // Seed Parts with categories, brands, and costs
+    // Seed Parts with categories, brands, costs, prices, and images
     const partsData = [
-      { partNo: 'ENG-001', description: 'Engine Oil Filter', category: 'Filters', brand: 'Bosch', cost: 500, priceA: 750, reorderLevel: 10 },
-      { partNo: 'ENG-002', description: 'Air Filter', category: 'Filters', brand: 'Bosch', cost: 300, priceA: 450, reorderLevel: 15 },
-      { partNo: 'ENG-003', description: 'Fuel Filter', category: 'Filters', brand: 'Generic', cost: 250, priceA: 400, reorderLevel: 20 },
-      { partNo: 'BRK-001', description: 'Brake Pad Set Front', category: 'Brake System', brand: 'Brembo', cost: 2000, priceA: 3000, reorderLevel: 5 },
-      { partNo: 'BRK-002', description: 'Brake Pad Set Rear', category: 'Brake System', brand: 'Brembo', cost: 1500, priceA: 2250, reorderLevel: 5 },
-      { partNo: 'BRK-003', description: 'Brake Disc Front', category: 'Brake System', brand: 'Brembo', cost: 3500, priceA: 5000, reorderLevel: 3 },
-      { partNo: 'ENG-004', description: 'Timing Belt', category: 'Belts', brand: 'Generic', cost: 1200, priceA: 1800, reorderLevel: 8 },
-      { partNo: 'ENG-005', description: 'Serpentine Belt', category: 'Belts', brand: 'Generic', cost: 800, priceA: 1200, reorderLevel: 10 },
-      { partNo: 'ENG-006', description: 'Spark Plug Set', category: 'Engine Parts', brand: 'Bosch', cost: 600, priceA: 900, reorderLevel: 12 },
-      { partNo: 'ENG-007', description: 'Oil Pump', category: 'Engine Parts', brand: 'Toyota', cost: 5000, priceA: 7500, reorderLevel: 2 },
-      { partNo: 'ENG-008', description: 'Water Pump', category: 'Engine Parts', brand: 'Toyota', cost: 4500, priceA: 6500, reorderLevel: 3 },
-      { partNo: 'ELC-001', description: 'Alternator', category: 'Electrical', brand: 'Honda', cost: 8000, priceA: 12000, reorderLevel: 2 },
-      { partNo: 'ELC-002', description: 'Starter Motor', category: 'Electrical', brand: 'Honda', cost: 6000, priceA: 9000, reorderLevel: 2 },
-      { partNo: 'ELC-003', description: 'Battery 12V', category: 'Electrical', brand: 'Generic', cost: 4000, priceA: 6000, reorderLevel: 5 },
-      { partNo: 'FIL-004', description: 'Cabin Air Filter', category: 'Filters', brand: 'Bosch', cost: 400, priceA: 600, reorderLevel: 15 },
-      { partNo: 'BRK-004', description: 'Brake Fluid', category: 'Brake System', brand: 'Brembo', cost: 500, priceA: 750, reorderLevel: 10 },
-      { partNo: 'ENG-009', description: 'Radiator', category: 'Engine Parts', brand: 'Toyota', cost: 6000, priceA: 9000, reorderLevel: 2 },
-      { partNo: 'ELC-004', description: 'Headlight Bulb', category: 'Electrical', brand: 'Generic', cost: 200, priceA: 300, reorderLevel: 20 },
+      { 
+        partNo: 'ENG-001', 
+        description: 'Engine Oil Filter - High Performance Synthetic Media', 
+        category: 'Filters', 
+        brand: 'Bosch', 
+        cost: 500, 
+        priceA: 750, 
+        priceB: 650,
+        priceM: 700,
+        reorderLevel: 10,
+        uom: 'pcs',
+        hsCode: '84212300',
+        weight: 0.5,
+        size: 'Standard',
+        smc: 'SMC-ENG-001',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'ENG-002', 
+        description: 'Air Filter Element - Premium Quality Paper Media', 
+        category: 'Filters', 
+        brand: 'Bosch', 
+        cost: 300, 
+        priceA: 450,
+        priceB: 400,
+        priceM: 425,
+        reorderLevel: 15,
+        uom: 'pcs',
+        hsCode: '84212300',
+        weight: 0.3,
+        size: 'Standard',
+        smc: 'SMC-ENG-002',
+        imageP1: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'ENG-003', 
+        description: 'Fuel Filter - Inline High Pressure Filter', 
+        category: 'Filters', 
+        brand: 'Generic', 
+        cost: 250, 
+        priceA: 400,
+        priceB: 350,
+        priceM: 375,
+        reorderLevel: 20,
+        uom: 'pcs',
+        hsCode: '84212300',
+        weight: 0.2,
+        size: 'Standard',
+        smc: 'SMC-ENG-003',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'BRK-001', 
+        description: 'Brake Pad Set Front - Ceramic Compound Low Noise', 
+        category: 'Brake System', 
+        brand: 'Brembo', 
+        cost: 2000, 
+        priceA: 3000,
+        priceB: 2700,
+        priceM: 2850,
+        reorderLevel: 5,
+        uom: 'set',
+        hsCode: '87083900',
+        weight: 1.2,
+        size: 'Standard',
+        smc: 'SMC-BRK-001',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'BRK-002', 
+        description: 'Brake Pad Set Rear - Ceramic Compound Low Noise', 
+        category: 'Brake System', 
+        brand: 'Brembo', 
+        cost: 1500, 
+        priceA: 2250,
+        priceB: 2000,
+        priceM: 2125,
+        reorderLevel: 5,
+        uom: 'set',
+        hsCode: '87083900',
+        weight: 0.9,
+        size: 'Standard',
+        smc: 'SMC-BRK-002',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'BRK-003', 
+        description: 'Brake Disc Front - Ventilated Rotor High Performance', 
+        category: 'Brake System', 
+        brand: 'Brembo', 
+        cost: 3500, 
+        priceA: 5000,
+        priceB: 4500,
+        priceM: 4750,
+        reorderLevel: 3,
+        uom: 'pcs',
+        hsCode: '87083900',
+        weight: 8.5,
+        size: 'Standard',
+        smc: 'SMC-BRK-003',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'ENG-004', 
+        description: 'Timing Belt - Reinforced Rubber with Fiber Cord', 
+        category: 'Belts', 
+        brand: 'Generic', 
+        cost: 1200, 
+        priceA: 1800,
+        priceB: 1600,
+        priceM: 1700,
+        reorderLevel: 8,
+        uom: 'pcs',
+        hsCode: '40109900',
+        weight: 0.4,
+        size: 'Standard',
+        smc: 'SMC-ENG-004',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'ENG-005', 
+        description: 'Serpentine Belt - Multi-Rib V-Belt', 
+        category: 'Belts', 
+        brand: 'Generic', 
+        cost: 800, 
+        priceA: 1200,
+        priceB: 1100,
+        priceM: 1150,
+        reorderLevel: 10,
+        uom: 'pcs',
+        hsCode: '40109900',
+        weight: 0.3,
+        size: 'Standard',
+        smc: 'SMC-ENG-005',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'ENG-006', 
+        description: 'Spark Plug Set - Iridium Tip Long Life', 
+        category: 'Engine Parts', 
+        brand: 'Bosch', 
+        cost: 600, 
+        priceA: 900,
+        priceB: 800,
+        priceM: 850,
+        reorderLevel: 12,
+        uom: 'set',
+        hsCode: '85111000',
+        weight: 0.2,
+        size: 'Standard',
+        smc: 'SMC-ENG-006',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'ENG-007', 
+        description: 'Oil Pump - Mechanical Gear Type', 
+        category: 'Engine Parts', 
+        brand: 'Toyota', 
+        cost: 5000, 
+        priceA: 7500,
+        priceB: 7000,
+        priceM: 7250,
+        reorderLevel: 2,
+        uom: 'pcs',
+        hsCode: '84133000',
+        weight: 2.5,
+        size: 'Standard',
+        smc: 'SMC-ENG-007',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'ENG-008', 
+        description: 'Water Pump - Aluminum Housing with Impeller', 
+        category: 'Engine Parts', 
+        brand: 'Toyota', 
+        cost: 4500, 
+        priceA: 6500,
+        priceB: 6000,
+        priceM: 6250,
+        reorderLevel: 3,
+        uom: 'pcs',
+        hsCode: '84133000',
+        weight: 2.0,
+        size: 'Standard',
+        smc: 'SMC-ENG-008',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'ELC-001', 
+        description: 'Alternator - 12V 90A High Output', 
+        category: 'Electrical', 
+        brand: 'Honda', 
+        cost: 8000, 
+        priceA: 12000,
+        priceB: 11000,
+        priceM: 11500,
+        reorderLevel: 2,
+        uom: 'pcs',
+        hsCode: '85115000',
+        weight: 5.5,
+        size: 'Standard',
+        smc: 'SMC-ELC-001',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'ELC-002', 
+        description: 'Starter Motor - 12V High Torque', 
+        category: 'Electrical', 
+        brand: 'Honda', 
+        cost: 6000, 
+        priceA: 9000,
+        priceB: 8500,
+        priceM: 8750,
+        reorderLevel: 2,
+        uom: 'pcs',
+        hsCode: '85115000',
+        weight: 4.2,
+        size: 'Standard',
+        smc: 'SMC-ELC-002',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'ELC-003', 
+        description: 'Battery 12V 60Ah - Maintenance Free', 
+        category: 'Electrical', 
+        brand: 'Generic', 
+        cost: 4000, 
+        priceA: 6000,
+        priceB: 5500,
+        priceM: 5750,
+        reorderLevel: 5,
+        uom: 'pcs',
+        hsCode: '85072000',
+        weight: 18.0,
+        size: 'Standard',
+        smc: 'SMC-ELC-003',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'FIL-004', 
+        description: 'Cabin Air Filter - Activated Carbon', 
+        category: 'Filters', 
+        brand: 'Bosch', 
+        cost: 400, 
+        priceA: 600,
+        priceB: 550,
+        priceM: 575,
+        reorderLevel: 15,
+        uom: 'pcs',
+        hsCode: '84212300',
+        weight: 0.25,
+        size: 'Standard',
+        smc: 'SMC-FIL-004',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'BRK-004', 
+        description: 'Brake Fluid DOT 4 - 500ml Bottle', 
+        category: 'Brake System', 
+        brand: 'Brembo', 
+        cost: 500, 
+        priceA: 750,
+        priceB: 700,
+        priceM: 725,
+        reorderLevel: 10,
+        uom: 'bottle',
+        hsCode: '38190000',
+        weight: 0.6,
+        size: '500ml',
+        smc: 'SMC-BRK-004',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'ENG-009', 
+        description: 'Radiator - Aluminum Core with Plastic Tanks', 
+        category: 'Engine Parts', 
+        brand: 'Toyota', 
+        cost: 6000, 
+        priceA: 9000,
+        priceB: 8500,
+        priceM: 8750,
+        reorderLevel: 2,
+        uom: 'pcs',
+        hsCode: '87089100',
+        weight: 12.0,
+        size: 'Standard',
+        smc: 'SMC-ENG-009',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'ELC-004', 
+        description: 'Headlight Bulb H4 - Halogen 60/55W', 
+        category: 'Electrical', 
+        brand: 'Generic', 
+        cost: 200, 
+        priceA: 300,
+        priceB: 280,
+        priceM: 290,
+        reorderLevel: 20,
+        uom: 'pcs',
+        hsCode: '85392100',
+        weight: 0.1,
+        size: 'H4',
+        smc: 'SMC-ELC-004',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'SUS-001', 
+        description: 'Shock Absorber Front - Gas Filled', 
+        category: 'Engine Parts', 
+        brand: 'Nissan', 
+        cost: 3500, 
+        priceA: 5000,
+        priceB: 4500,
+        priceM: 4750,
+        reorderLevel: 4,
+        uom: 'pcs',
+        hsCode: '87088000',
+        weight: 3.5,
+        size: 'Standard',
+        smc: 'SMC-SUS-001',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'SUS-002', 
+        description: 'Shock Absorber Rear - Gas Filled', 
+        category: 'Engine Parts', 
+        brand: 'Nissan', 
+        cost: 3200, 
+        priceA: 4500,
+        priceB: 4000,
+        priceM: 4250,
+        reorderLevel: 4,
+        uom: 'pcs',
+        hsCode: '87088000',
+        weight: 3.2,
+        size: 'Standard',
+        smc: 'SMC-SUS-002',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
+      { 
+        partNo: 'ENG-010', 
+        description: 'Thermostat - Wax Type 82°C', 
+        category: 'Engine Parts', 
+        brand: 'Generic', 
+        cost: 300, 
+        priceA: 450,
+        priceB: 400,
+        priceM: 425,
+        reorderLevel: 15,
+        uom: 'pcs',
+        hsCode: '84818000',
+        weight: 0.15,
+        size: 'Standard',
+        smc: 'SMC-ENG-010',
+        imageP1: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop',
+        imageP2: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=400&h=400&fit=crop'
+      },
     ];
 
     console.log('📦 Seeding parts...');
@@ -82,8 +443,17 @@ async function seed() {
             brandId: brand.id,
             cost: partData.cost,
             priceA: partData.priceA,
+            priceB: partData.priceB,
+            priceM: partData.priceM,
             reorderLevel: partData.reorderLevel,
             status: 'active',
+            uom: partData.uom,
+            hsCode: partData.hsCode,
+            weight: partData.weight,
+            size: partData.size,
+            smc: partData.smc,
+            imageP1: partData.imageP1,
+            imageP2: partData.imageP2,
           },
           create: {
             partNo: partData.partNo,
@@ -92,9 +462,17 @@ async function seed() {
             brandId: brand.id,
             cost: partData.cost,
             priceA: partData.priceA,
+            priceB: partData.priceB,
+            priceM: partData.priceM,
             reorderLevel: partData.reorderLevel,
             status: 'active',
-            uom: 'pcs',
+            uom: partData.uom,
+            hsCode: partData.hsCode,
+            weight: partData.weight,
+            size: partData.size,
+            smc: partData.smc,
+            imageP1: partData.imageP1,
+            imageP2: partData.imageP2,
           },
         });
         createdParts.push(part);
@@ -203,7 +581,6 @@ async function seed() {
     const allShelves = createdShelves;
     
     const movements = [];
-    const now = new Date();
     
     // Create stock movements for the last 6 months with stores, racks, and shelves
     for (let monthOffset = 5; monthOffset >= 0; monthOffset--) {
@@ -645,17 +1022,7 @@ async function seed() {
       console.log('⚠️  Skipping adjustment seeding - need at least 1 store and parts');
     }
 
-    console.log('✅ Seeding completed successfully!');
-    console.log(`📊 Summary:`);
-    console.log(`   - Categories: ${seededCategories.length}`);
-    console.log(`   - Brands: ${seededBrands.length}`);
-    console.log(`   - Parts: ${createdParts.length}`);
-    console.log(`   - Stock Movements: ${movements.length + createdParts.length}`);
-    console.log(`   - Stores: ${createdStores.length}`);
-    console.log(`   - Racks: ${createdRacks.length}`);
-    console.log(`   - Shelves: ${createdShelves.length}`);
-    console.log(`   - Transfers: 2`);
-    console.log(`   - Adjustments: 3`);
+    // Note: Summary will be printed at the end after all seeding is complete
 
     // Seed Sample Direct Purchase Orders
     console.log('🛒 Seeding sample direct purchase orders...');
@@ -673,10 +1040,22 @@ async function seed() {
       const part2 = createdParts[1];
       const part3 = createdParts[2] || createdParts[0];
 
-      // DPO 1
-      const dpo1 = await prisma.directPurchaseOrder.create({
-        data: {
-          dpoNumber: `DPO-${new Date().getFullYear()}-001`,
+      const dpoNumber1 = `DPO-${new Date().getFullYear()}-001`;
+      const dpoNumber2 = `DPO-${new Date().getFullYear()}-002`;
+
+      // Check if DPOs already exist
+      const existingDPO1 = await prisma.directPurchaseOrder.findUnique({
+        where: { dpoNumber: dpoNumber1 },
+      });
+      const existingDPO2 = await prisma.directPurchaseOrder.findUnique({
+        where: { dpoNumber: dpoNumber2 },
+      });
+
+      if (!existingDPO1) {
+        // DPO 1
+        const dpo1 = await prisma.directPurchaseOrder.create({
+          data: {
+            dpoNumber: dpoNumber1,
           date: dpoDate1,
           storeId: store1.id,
           account: 'Cash Account',
@@ -714,8 +1093,8 @@ async function seed() {
         },
       });
 
-      // Create stock movements for DPO 1
-      await prisma.stockMovement.createMany({
+        // Create stock movements for DPO 1
+        await prisma.stockMovement.createMany({
         data: [
           {
             partId: part1.id,
@@ -736,12 +1115,14 @@ async function seed() {
             notes: `Direct Purchase Order: ${dpo1.dpoNumber}`,
           },
         ],
-      });
+        });
+      }
 
-      // DPO 2
-      const dpo2 = await prisma.directPurchaseOrder.create({
+      if (!existingDPO2) {
+        // DPO 2
+        const dpo2 = await prisma.directPurchaseOrder.create({
         data: {
-          dpoNumber: `DPO-${new Date().getFullYear()}-002`,
+          dpoNumber: dpoNumber2,
           date: dpoDate2,
           storeId: store1.id,
           account: 'Bank Account',
@@ -762,20 +1143,26 @@ async function seed() {
         },
       });
 
-      // Create stock movements for DPO 2
-      await prisma.stockMovement.create({
-        data: {
-          partId: part3.id,
-          type: 'in',
-          quantity: 50,
-          storeId: store1.id,
-          referenceType: 'direct_purchase',
-          referenceId: dpo2.id,
-          notes: `Direct Purchase Order: ${dpo2.dpoNumber}`,
-        },
-      });
+        // Create stock movements for DPO 2
+        await prisma.stockMovement.create({
+          data: {
+            partId: part3.id,
+            type: 'in',
+            quantity: 50,
+            storeId: store1.id,
+            referenceType: 'direct_purchase',
+            referenceId: dpo2.id,
+            notes: `Direct Purchase Order: ${dpo2.dpoNumber}`,
+          },
+        });
+      }
 
-      console.log('✅ 2 sample direct purchase orders seeded');
+      const dpoCount = (existingDPO1 ? 0 : 1) + (existingDPO2 ? 0 : 1);
+      if (dpoCount > 0) {
+        console.log(`✅ ${dpoCount} sample direct purchase orders seeded`);
+      } else {
+        console.log('⚠️  Direct purchase orders already exist, skipping...');
+      }
     } else {
       console.log('⚠️  Skipping DPO seeding - need at least 1 store and parts');
     }
@@ -889,6 +1276,905 @@ async function seed() {
     console.log(`   - Main Groups: ${createdMainGroups.length}`);
     console.log(`   - Subgroups: ${createdSubgroups.length}`);
     console.log(`   - Accounts: ${createdAccounts.length}`);
+
+    // Seed Customers
+    console.log('👥 Seeding customers...');
+    const customersData = [
+      {
+        name: 'Ahmed Auto Parts',
+        address: '123 Main Street, Karachi',
+        email: 'ahmed@autoparts.com',
+        contactNo: '+92-300-1234567',
+        cnic: '42101-1234567-1',
+        openingBalance: 50000,
+        creditLimit: 200000,
+      },
+      {
+        name: 'Hassan Motors',
+        address: '456 Business Avenue, Lahore',
+        email: 'hassan@motors.com',
+        contactNo: '+92-300-2345678',
+        cnic: '35202-2345678-2',
+        openingBalance: 75000,
+        creditLimit: 300000,
+      },
+      {
+        name: 'Ali Trading Company',
+        address: '789 Market Road, Islamabad',
+        email: 'ali@trading.com',
+        contactNo: '+92-300-3456789',
+        cnic: '37303-3456789-3',
+        openingBalance: 100000,
+        creditLimit: 500000,
+      },
+      {
+        name: 'Zain Enterprises',
+        address: '321 Commercial Plaza, Faisalabad',
+        email: 'zain@enterprises.com',
+        contactNo: '+92-300-4567890',
+        cnic: '36104-4567890-4',
+        openingBalance: 30000,
+        creditLimit: 150000,
+      },
+      {
+        name: 'Bilal Auto Services',
+        address: '654 Service Center, Rawalpindi',
+        email: 'bilal@autoservices.com',
+        contactNo: '+92-300-5678901',
+        cnic: '37305-5678901-5',
+        openingBalance: 25000,
+        creditLimit: 100000,
+      },
+    ];
+
+    const createdCustomers = [];
+    for (const customerData of customersData) {
+      // Check if customer exists by name
+      const existing = await prisma.customer.findFirst({
+        where: { name: customerData.name },
+      });
+      
+      if (!existing) {
+        const customer = await prisma.customer.create({
+          data: customerData,
+        });
+        createdCustomers.push(customer);
+      } else {
+        createdCustomers.push(existing);
+      }
+    }
+    console.log(`✅ ${createdCustomers.length} customers seeded`);
+
+    // Seed Suppliers
+    console.log('🏭 Seeding suppliers...');
+    const suppliersData = [
+      {
+        code: 'SUP-001',
+        name: 'Auto Parts Distributors Ltd',
+        companyName: 'Auto Parts Distributors Limited',
+        address: '100 Industrial Area, Karachi',
+        city: 'Karachi',
+        state: 'Sindh',
+        country: 'Pakistan',
+        zipCode: '75000',
+        email: 'info@autopartsdist.com',
+        phone: '+92-21-12345678',
+        cnic: '42101-9876543-1',
+        contactPerson: 'Mr. Muhammad Ali',
+        taxId: 'TAX-001-2024',
+        paymentTerms: 'Net 30',
+        notes: 'Primary supplier for engine parts',
+      },
+      {
+        code: 'SUP-002',
+        name: 'Brake Systems International',
+        companyName: 'Brake Systems International Pvt Ltd',
+        address: '200 Manufacturing Zone, Lahore',
+        city: 'Lahore',
+        state: 'Punjab',
+        country: 'Pakistan',
+        zipCode: '54000',
+        email: 'sales@brakesystems.com',
+        phone: '+92-42-23456789',
+        cnic: '35202-8765432-2',
+        contactPerson: 'Ms. Fatima Khan',
+        taxId: 'TAX-002-2024',
+        paymentTerms: 'Net 45',
+        notes: 'Specialized in brake components',
+      },
+      {
+        code: 'SUP-003',
+        name: 'Electrical Components Co',
+        companyName: 'Electrical Components Company',
+        address: '300 Tech Park, Islamabad',
+        city: 'Islamabad',
+        state: 'ICT',
+        country: 'Pakistan',
+        zipCode: '44000',
+        email: 'contact@electricalcomp.com',
+        phone: '+92-51-34567890',
+        cnic: '37303-7654321-3',
+        contactPerson: 'Mr. Usman Ahmed',
+        taxId: 'TAX-003-2024',
+        paymentTerms: 'Net 30',
+        notes: 'Electrical parts supplier',
+      },
+      {
+        code: 'SUP-004',
+        name: 'Filter Manufacturing Inc',
+        companyName: 'Filter Manufacturing Incorporated',
+        address: '400 Production Street, Faisalabad',
+        city: 'Faisalabad',
+        state: 'Punjab',
+        country: 'Pakistan',
+        zipCode: '38000',
+        email: 'orders@filtermanufacturing.com',
+        phone: '+92-41-45678901',
+        cnic: '36104-6543210-4',
+        contactPerson: 'Mr. Saeed Hassan',
+        taxId: 'TAX-004-2024',
+        paymentTerms: 'Net 15',
+        notes: 'Filter specialist',
+      },
+    ];
+
+    const createdSuppliers = [];
+    for (const supplierData of suppliersData) {
+      const supplier = await prisma.supplier.upsert({
+        where: { code: supplierData.code },
+        update: supplierData,
+        create: supplierData,
+      });
+      createdSuppliers.push(supplier);
+    }
+    console.log(`✅ ${createdSuppliers.length} suppliers seeded`);
+
+    // Seed Expense Types
+    console.log('💰 Seeding expense types...');
+    const expenseTypesData = [
+      {
+        code: 'EXP-001',
+        name: 'Office Rent',
+        description: 'Monthly office rental expenses',
+        category: 'Operating',
+        budget: 50000,
+        spent: 45000,
+      },
+      {
+        code: 'EXP-002',
+        name: 'Utilities',
+        description: 'Electricity, water, gas bills',
+        category: 'Operating',
+        budget: 25000,
+        spent: 22000,
+      },
+      {
+        code: 'EXP-003',
+        name: 'Salaries',
+        description: 'Employee salaries and wages',
+        category: 'Personnel',
+        budget: 200000,
+        spent: 200000,
+      },
+      {
+        code: 'EXP-004',
+        name: 'Transportation',
+        description: 'Vehicle fuel and maintenance',
+        category: 'Operating',
+        budget: 30000,
+        spent: 28000,
+      },
+      {
+        code: 'EXP-005',
+        name: 'Marketing',
+        description: 'Advertising and promotional expenses',
+        category: 'Marketing',
+        budget: 40000,
+        spent: 35000,
+      },
+      {
+        code: 'EXP-006',
+        name: 'Office Supplies',
+        description: 'Stationery and office materials',
+        category: 'Operating',
+        budget: 15000,
+        spent: 12000,
+      },
+    ];
+
+    const createdExpenseTypes = [];
+    for (const expenseTypeData of expenseTypesData) {
+      const expenseType = await prisma.expenseType.upsert({
+        where: { code: expenseTypeData.code },
+        update: expenseTypeData,
+        create: expenseTypeData,
+      });
+      createdExpenseTypes.push(expenseType);
+    }
+    console.log(`✅ ${createdExpenseTypes.length} expense types seeded`);
+
+    // Seed Posted Expenses
+    console.log('📝 Seeding posted expenses...');
+    const postedExpensesData = [
+      {
+        date: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000),
+        expenseTypeId: createdExpenseTypes[0].id,
+        amount: 50000,
+        paidTo: 'Property Management Co',
+        paymentMode: 'Bank Transfer',
+        referenceNumber: 'TXN-001-2024',
+        description: 'Monthly office rent for January',
+      },
+      {
+        date: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000),
+        expenseTypeId: createdExpenseTypes[1].id,
+        amount: 15000,
+        paidTo: 'K-Electric',
+        paymentMode: 'Online Payment',
+        referenceNumber: 'TXN-002-2024',
+        description: 'Electricity bill for December',
+      },
+      {
+        date: new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000),
+        expenseTypeId: createdExpenseTypes[2].id,
+        amount: 200000,
+        paidTo: 'Payroll Account',
+        paymentMode: 'Bank Transfer',
+        referenceNumber: 'TXN-003-2024',
+        description: 'Monthly salaries for December',
+      },
+      {
+        date: new Date(now.getTime() - 20 * 24 * 60 * 60 * 1000),
+        expenseTypeId: createdExpenseTypes[3].id,
+        amount: 12000,
+        paidTo: 'Shell Petrol Station',
+        paymentMode: 'Cash',
+        referenceNumber: 'TXN-004-2024',
+        description: 'Vehicle fuel expenses',
+      },
+      {
+        date: new Date(now.getTime() - 25 * 24 * 60 * 60 * 1000),
+        expenseTypeId: createdExpenseTypes[4].id,
+        amount: 20000,
+        paidTo: 'Digital Marketing Agency',
+        paymentMode: 'Bank Transfer',
+        referenceNumber: 'TXN-005-2024',
+        description: 'Social media advertising campaign',
+      },
+    ];
+
+    for (const expenseData of postedExpensesData) {
+      await prisma.postedExpense.create({
+        data: expenseData,
+      });
+    }
+    console.log(`✅ ${postedExpensesData.length} posted expenses seeded`);
+
+    // Seed Purchase Orders
+    console.log('🛒 Seeding purchase orders...');
+    if (createdSuppliers.length > 0 && createdParts.length > 0) {
+      const poDate1 = new Date(now);
+      poDate1.setDate(poDate1.getDate() - 7);
+      
+      const poDate2 = new Date(now);
+      poDate2.setDate(poDate2.getDate() - 14);
+
+      const poNumber1 = `PO-${new Date().getFullYear()}-001`;
+      const poNumber2 = `PO-${new Date().getFullYear()}-002`;
+
+      // Check if POs already exist
+      const existingPO1 = await prisma.purchaseOrder.findUnique({
+        where: { poNumber: poNumber1 },
+      });
+      const existingPO2 = await prisma.purchaseOrder.findUnique({
+        where: { poNumber: poNumber2 },
+      });
+
+      if (!existingPO1) {
+        const po1 = await prisma.purchaseOrder.create({
+          data: {
+            poNumber: poNumber1,
+            date: poDate1,
+            supplierId: createdSuppliers[0].id,
+            status: 'Completed',
+            expectedDate: new Date(poDate1.getTime() + 7 * 24 * 60 * 60 * 1000),
+            notes: 'Regular stock replenishment order',
+            totalAmount: (createdParts[0].cost || 0) * 50 + (createdParts[1].cost || 0) * 30,
+          items: {
+            create: [
+              {
+                partId: createdParts[0].id,
+                quantity: 50,
+                unitCost: createdParts[0].cost || 0,
+                totalCost: (createdParts[0].cost || 0) * 50,
+                receivedQty: 50,
+                notes: 'Received in full',
+              },
+              {
+                partId: createdParts[1].id,
+                quantity: 30,
+                unitCost: createdParts[1].cost || 0,
+                totalCost: (createdParts[1].cost || 0) * 30,
+                receivedQty: 30,
+                notes: 'Received in full',
+              },
+            ],
+          },
+        },
+      });
+
+      if (!existingPO2) {
+        const po2 = await prisma.purchaseOrder.create({
+          data: {
+            poNumber: poNumber2,
+            date: poDate2,
+            supplierId: createdSuppliers[1].id,
+            status: 'Pending',
+            expectedDate: new Date(poDate2.getTime() + 14 * 24 * 60 * 60 * 1000),
+            notes: 'Pending approval',
+            totalAmount: (createdParts[2].cost || 0) * 40 + (createdParts[3].cost || 0) * 20,
+            items: {
+              create: [
+                {
+                  partId: createdParts[2].id,
+                  quantity: 40,
+                  unitCost: createdParts[2].cost || 0,
+                  totalCost: (createdParts[2].cost || 0) * 40,
+                  receivedQty: 0,
+                  notes: 'Awaiting delivery',
+                },
+                {
+                  partId: createdParts[3].id,
+                  quantity: 20,
+                  unitCost: createdParts[3].cost || 0,
+                  totalCost: (createdParts[3].cost || 0) * 20,
+                  receivedQty: 0,
+                  notes: 'Awaiting delivery',
+                },
+              ],
+            },
+          },
+        });
+      }
+
+      const poCount = (existingPO1 ? 0 : 1) + (existingPO2 ? 0 : 1);
+      if (poCount > 0) {
+        console.log(`✅ ${poCount} purchase orders seeded`);
+      } else {
+        console.log('⚠️  Purchase orders already exist, skipping...');
+      }
+    } else {
+      console.log('⚠️  Skipping purchase order seeding - need suppliers and parts');
+    }
+
+    // Seed Journal Entries
+    console.log('📖 Seeding journal entries...');
+    if (createdAccounts.length >= 4) {
+      const journalDate1 = new Date(now);
+      journalDate1.setDate(journalDate1.getDate() - 3);
+
+      const journalEntryNo1 = `JE-${new Date().getFullYear()}-001`;
+      const journalEntryNo2 = `JE-${new Date().getFullYear()}-002`;
+
+      // Check if journal entries already exist
+      const existingJE1 = await prisma.journalEntry.findUnique({
+        where: { entryNo: journalEntryNo1 },
+      });
+      const existingJE2 = await prisma.journalEntry.findUnique({
+        where: { entryNo: journalEntryNo2 },
+      });
+
+      if (!existingJE1) {
+        const journal1 = await prisma.journalEntry.create({
+          data: {
+            entryNo: journalEntryNo1,
+            entryDate: journalDate1,
+            reference: 'REF-001',
+            description: 'Opening balance adjustment',
+            totalDebit: 100000,
+            totalCredit: 100000,
+            status: 'posted',
+            createdBy: 'System',
+            postedBy: 'Admin',
+            postedAt: journalDate1,
+            lines: {
+              create: [
+                {
+                  accountId: createdAccounts[0].id, // Cash account
+                  description: 'Opening cash balance',
+                  debit: 100000,
+                  credit: 0,
+                  lineOrder: 1,
+                },
+                {
+                  accountId: createdAccounts[8].id, // Owner's Capital
+                  description: 'Opening capital',
+                  debit: 0,
+                  credit: 100000,
+                  lineOrder: 2,
+                },
+              ],
+            },
+          },
+        });
+
+      }
+
+      if (!existingJE2) {
+        const journalDate2 = new Date(now);
+        journalDate2.setDate(journalDate2.getDate() - 1);
+
+        const journal2 = await prisma.journalEntry.create({
+          data: {
+            entryNo: journalEntryNo2,
+            entryDate: journalDate2,
+            reference: 'REF-002',
+            description: 'Sales revenue entry',
+            totalDebit: 50000,
+            totalCredit: 50000,
+            status: 'posted',
+            createdBy: 'System',
+            postedBy: 'Admin',
+            postedAt: journalDate2,
+            lines: {
+              create: [
+                {
+                  accountId: createdAccounts[1].id, // Bank account
+                  description: 'Sales revenue received',
+                  debit: 50000,
+                  credit: 0,
+                  lineOrder: 1,
+                },
+                {
+                  accountId: createdAccounts[9].id, // Sales Revenue
+                  description: 'Sales revenue',
+                  debit: 0,
+                  credit: 50000,
+                  lineOrder: 2,
+                },
+              ],
+            },
+          },
+        });
+
+      }
+
+      const jeCount = (existingJE1 ? 0 : 1) + (existingJE2 ? 0 : 1);
+      if (jeCount > 0) {
+        console.log(`✅ ${jeCount} journal entries seeded`);
+      } else {
+        console.log('⚠️  Journal entries already exist, skipping...');
+      }
+    } else {
+      console.log('⚠️  Skipping journal entry seeding - need at least 4 accounts');
+    }
+
+    // Seed Kits
+    console.log('📦 Seeding kits...');
+    if (createdParts.length >= 5) {
+      const kitsData = [
+        {
+          badge: 'KIT-001',
+          name: 'Brake Service Kit',
+          description: 'Complete brake service kit including pads, discs, and fluid',
+          sellingPrice: 8500,
+          status: 'Active',
+          items: [
+            { partIndex: 3, quantity: 1, partNo: 'BRK-001' }, // Brake Pad Set Front
+            { partIndex: 4, quantity: 1, partNo: 'BRK-002' }, // Brake Pad Set Rear
+            { partIndex: 15, quantity: 2, partNo: 'BRK-004' }, // Brake Fluid
+          ],
+        },
+        {
+          badge: 'KIT-002',
+          name: 'Engine Maintenance Kit',
+          description: 'Essential engine maintenance parts kit',
+          sellingPrice: 3500,
+          status: 'Active',
+          items: [
+            { partIndex: 0, quantity: 1, partNo: 'ENG-001' }, // Engine Oil Filter
+            { partIndex: 1, quantity: 1, partNo: 'ENG-002' }, // Air Filter
+            { partIndex: 2, quantity: 1, partNo: 'ENG-003' }, // Fuel Filter
+            { partIndex: 8, quantity: 1, partNo: 'ENG-006' }, // Spark Plug Set
+          ],
+        },
+        {
+          badge: 'KIT-003',
+          name: 'Filter Replacement Kit',
+          description: 'Complete filter replacement kit for regular maintenance',
+          sellingPrice: 2000,
+          status: 'Active',
+          items: [
+            { partIndex: 0, quantity: 1, partNo: 'ENG-001' }, // Engine Oil Filter
+            { partIndex: 1, quantity: 1, partNo: 'ENG-002' }, // Air Filter
+            { partIndex: 13, quantity: 1, partNo: 'FIL-004' }, // Cabin Air Filter
+          ],
+        },
+        {
+          badge: 'KIT-004',
+          name: 'Electrical System Kit',
+          description: 'Complete electrical system components',
+          sellingPrice: 25000,
+          status: 'Active',
+          items: [
+            { partIndex: 10, quantity: 1, partNo: 'ELC-001' }, // Alternator
+            { partIndex: 11, quantity: 1, partNo: 'ELC-002' }, // Starter Motor
+            { partIndex: 12, quantity: 1, partNo: 'ELC-003' }, // Battery
+          ],
+        },
+        {
+          badge: 'KIT-005',
+          name: 'Cooling System Kit',
+          description: 'Complete cooling system maintenance kit',
+          sellingPrice: 12000,
+          status: 'Active',
+          items: [
+            { partIndex: 9, quantity: 1, partNo: 'ENG-008' }, // Water Pump
+            { partIndex: 16, quantity: 1, partNo: 'ENG-009' }, // Radiator
+            { partIndex: 19, quantity: 1, partNo: 'ENG-010' }, // Thermostat
+          ],
+        },
+      ];
+
+      const createdKits = [];
+      for (const kitData of kitsData) {
+        let totalCost = 0;
+        const kitItems = [];
+
+        for (const item of kitData.items) {
+          const part = createdParts[item.partIndex];
+          if (part && part.cost) {
+            const itemCost = part.cost * item.quantity;
+            totalCost += itemCost;
+            kitItems.push({
+              partId: part.id,
+              partNo: item.partNo,
+              partName: part.description || item.partNo,
+              quantity: item.quantity,
+              costPerUnit: part.cost,
+            });
+          }
+        }
+
+        try {
+          const kit = await prisma.kit.create({
+            data: {
+              badge: kitData.badge,
+              name: kitData.name,
+              description: kitData.description,
+              sellingPrice: kitData.sellingPrice,
+              totalCost: totalCost,
+              itemsCount: kitItems.length,
+              status: kitData.status,
+              items: {
+                create: kitItems,
+              },
+            },
+          });
+          createdKits.push(kit);
+        } catch (error: any) {
+          // If kit already exists, skip it
+          if (error.code !== 'P2002') {
+            console.error(`Error creating kit ${kitData.badge}:`, error);
+          }
+        }
+      }
+      console.log(`✅ ${createdKits.length} kits seeded`);
+    } else {
+      console.log('⚠️  Skipping kit seeding - need at least 5 parts');
+    }
+
+    // Add More Customers
+    console.log('👥 Seeding additional customers...');
+    const additionalCustomersData = [
+      {
+        name: 'Mehran Auto Works',
+        address: '555 Service Road, Multan',
+        email: 'mehran@autoworks.com',
+        contactNo: '+92-300-6789012',
+        cnic: '36105-6789012-6',
+        openingBalance: 40000,
+        creditLimit: 180000,
+      },
+      {
+        name: 'Sadiq Trading',
+        address: '888 Trade Center, Peshawar',
+        email: 'sadiq@trading.com',
+        contactNo: '+92-300-7890123',
+        cnic: '17306-7890123-7',
+        openingBalance: 60000,
+        creditLimit: 250000,
+      },
+      {
+        name: 'Karachi Motors Ltd',
+        address: '999 Business Hub, Karachi',
+        email: 'info@karachimotors.com',
+        contactNo: '+92-300-8901234',
+        cnic: '42107-8901234-8',
+        openingBalance: 150000,
+        creditLimit: 600000,
+      },
+    ];
+
+    for (const customerData of additionalCustomersData) {
+      const existing = await prisma.customer.findFirst({
+        where: { name: customerData.name },
+      });
+      
+      if (!existing) {
+        await prisma.customer.create({
+          data: customerData,
+        });
+      }
+    }
+    console.log(`✅ ${additionalCustomersData.length} additional customers seeded`);
+
+    // Add More Suppliers
+    console.log('🏭 Seeding additional suppliers...');
+    const additionalSuppliersData = [
+      {
+        code: 'SUP-005',
+        name: 'Global Auto Parts',
+        companyName: 'Global Auto Parts Trading Company',
+        address: '500 Export Zone, Karachi',
+        city: 'Karachi',
+        state: 'Sindh',
+        country: 'Pakistan',
+        zipCode: '75000',
+        email: 'sales@globalautoparts.com',
+        phone: '+92-21-34567890',
+        cnic: '42101-5432109-5',
+        contactPerson: 'Mr. Tariq Mehmood',
+        taxId: 'TAX-005-2024',
+        paymentTerms: 'Net 30',
+        notes: 'International supplier',
+      },
+      {
+        code: 'SUP-006',
+        name: 'Premium Components',
+        companyName: 'Premium Components Manufacturing',
+        address: '600 Production Avenue, Lahore',
+        city: 'Lahore',
+        state: 'Punjab',
+        country: 'Pakistan',
+        zipCode: '54000',
+        email: 'orders@premiumcomponents.com',
+        phone: '+92-42-45678901',
+        cnic: '35202-4321098-6',
+        contactPerson: 'Ms. Ayesha Malik',
+        taxId: 'TAX-006-2024',
+        paymentTerms: 'Net 15',
+        notes: 'Premium quality parts',
+      },
+    ];
+
+    for (const supplierData of additionalSuppliersData) {
+      await prisma.supplier.upsert({
+        where: { code: supplierData.code },
+        update: supplierData,
+        create: supplierData,
+      });
+    }
+    console.log(`✅ ${additionalSuppliersData.length} additional suppliers seeded`);
+
+    // Seed Vouchers
+    console.log('🧾 Seeding vouchers...');
+    if (createdAccounts.length >= 4) {
+      const voucherDate1 = new Date(now);
+      voucherDate1.setDate(voucherDate1.getDate() - 10);
+
+      const voucherDate2 = new Date(now);
+      voucherDate2.setDate(voucherDate2.getDate() - 5);
+
+      const voucherDate3 = new Date(now);
+      voucherDate3.setDate(voucherDate3.getDate() - 3);
+
+      // Receipt Voucher
+      try {
+        const receiptVoucher = await prisma.voucher.create({
+          data: {
+            voucherNumber: 'RV-1019',
+            type: 'receipt',
+            date: voucherDate1,
+            narration: 'Payment received from customer',
+            cashBankAccount: createdAccounts[1].name, // Bank account
+            totalDebit: 50000,
+            totalCredit: 50000,
+            status: 'posted',
+            createdBy: 'System',
+            approvedBy: 'Admin',
+            approvedAt: voucherDate1,
+            entries: {
+              create: [
+                {
+                  accountId: createdAccounts[1].id, // Bank account
+                  accountName: createdAccounts[1].name,
+                  description: 'Payment received',
+                  debit: 50000,
+                  credit: 0,
+                  sortOrder: 1,
+                },
+                {
+                  accountId: createdAccounts[8].id, // Accounts Receivable
+                  accountName: createdAccounts[8].name,
+                  description: 'Customer payment',
+                  debit: 0,
+                  credit: 50000,
+                  sortOrder: 2,
+                },
+              ],
+            },
+          },
+        });
+        console.log('✅ Receipt voucher seeded');
+      } catch (error: any) {
+        if (error.code !== 'P2002') {
+          console.error('Error creating receipt voucher:', error);
+        }
+      }
+
+      // Payment Voucher
+      try {
+        const paymentVoucher = await prisma.voucher.create({
+          data: {
+            voucherNumber: 'PV-2881',
+            type: 'payment',
+            date: voucherDate2,
+            narration: 'Payment made to supplier',
+            cashBankAccount: createdAccounts[0].name, // Cash account
+            totalDebit: 30000,
+            totalCredit: 30000,
+            status: 'posted',
+            createdBy: 'System',
+            approvedBy: 'Admin',
+            approvedAt: voucherDate2,
+            entries: {
+              create: [
+                {
+                  accountId: createdAccounts[7].id, // Accounts Payable
+                  accountName: createdAccounts[7].name,
+                  description: 'Supplier payment',
+                  debit: 30000,
+                  credit: 0,
+                  sortOrder: 1,
+                },
+                {
+                  accountId: createdAccounts[0].id, // Cash account
+                  accountName: createdAccounts[0].name,
+                  description: 'Payment made',
+                  debit: 0,
+                  credit: 30000,
+                  sortOrder: 2,
+                },
+              ],
+            },
+          },
+        });
+        console.log('✅ Payment voucher seeded');
+      } catch (error: any) {
+        if (error.code !== 'P2002') {
+          console.error('Error creating payment voucher:', error);
+        }
+      }
+
+      // Journal Voucher
+      try {
+        const journalVoucher = await prisma.voucher.create({
+          data: {
+            voucherNumber: 'JV-4633',
+            type: 'journal',
+            date: voucherDate3,
+            narration: 'Adjustment entry for depreciation',
+            totalDebit: 10000,
+            totalCredit: 10000,
+            status: 'posted',
+            createdBy: 'System',
+            approvedBy: 'Admin',
+            approvedAt: voucherDate3,
+            entries: {
+              create: [
+                {
+                  accountId: createdAccounts[10].id, // Operating Expenses
+                  accountName: createdAccounts[10].name,
+                  description: 'Depreciation expense',
+                  debit: 10000,
+                  credit: 0,
+                  sortOrder: 1,
+                },
+                {
+                  accountId: createdAccounts[2].id, // Bank account
+                  accountName: createdAccounts[2].name,
+                  description: 'Accumulated depreciation',
+                  debit: 0,
+                  credit: 10000,
+                  sortOrder: 2,
+                },
+              ],
+            },
+          },
+        });
+        console.log('✅ Journal voucher seeded');
+      } catch (error: any) {
+        if (error.code !== 'P2002') {
+          console.error('Error creating journal voucher:', error);
+        }
+      }
+
+      // Contra Voucher
+      try {
+        const contraVoucher = await prisma.voucher.create({
+          data: {
+            voucherNumber: 'CV-100',
+            type: 'contra',
+            date: voucherDate3,
+            narration: 'Cash transfer between accounts',
+            cashBankAccount: createdAccounts[0].name,
+            totalDebit: 20000,
+            totalCredit: 20000,
+            status: 'posted',
+            createdBy: 'System',
+            approvedBy: 'Admin',
+            approvedAt: voucherDate3,
+            entries: {
+              create: [
+                {
+                  accountId: createdAccounts[1].id, // Bank account
+                  accountName: createdAccounts[1].name,
+                  description: 'Cash deposited to bank',
+                  debit: 20000,
+                  credit: 0,
+                  sortOrder: 1,
+                },
+                {
+                  accountId: createdAccounts[0].id, // Cash account
+                  accountName: createdAccounts[0].name,
+                  description: 'Cash withdrawn',
+                  debit: 0,
+                  credit: 20000,
+                  sortOrder: 2,
+                },
+              ],
+            },
+          },
+        });
+        console.log('✅ Contra voucher seeded');
+      } catch (error: any) {
+        if (error.code !== 'P2002') {
+          console.error('Error creating contra voucher:', error);
+        }
+      }
+    } else {
+      console.log('⚠️  Skipping voucher seeding - need at least 4 accounts');
+    }
+
+    // Final Summary
+    console.log('✅ Seeding completed successfully!');
+    console.log(`📊 Final Summary:`);
+    const allCategories = await prisma.category.findMany();
+    const allBrands = await prisma.brand.findMany();
+    const allParts = await prisma.part.findMany();
+    const allStores = await prisma.store.findMany();
+    const allCustomers = await prisma.customer.findMany();
+    const allSuppliers = await prisma.supplier.findMany();
+    const allKits = await prisma.kit.findMany();
+    const allVouchers = await prisma.voucher.findMany();
+    const allExpenseTypes = await prisma.expenseType.findMany();
+    const allPostedExpenses = await prisma.postedExpense.findMany();
+    const allPurchaseOrders = await prisma.purchaseOrder.findMany();
+    const allJournalEntries = await prisma.journalEntry.findMany();
+    
+    console.log(`   - Categories: ${allCategories.length}`);
+    console.log(`   - Brands: ${allBrands.length}`);
+    console.log(`   - Parts: ${allParts.length}`);
+    console.log(`   - Stores: ${allStores.length}`);
+    console.log(`   - Customers: ${allCustomers.length}`);
+    console.log(`   - Suppliers: ${allSuppliers.length}`);
+    console.log(`   - Kits: ${allKits.length}`);
+    console.log(`   - Vouchers: ${allVouchers.length}`);
+    console.log(`   - Expense Types: ${allExpenseTypes.length}`);
+    console.log(`   - Posted Expenses: ${allPostedExpenses.length}`);
+    console.log(`   - Purchase Orders: ${allPurchaseOrders.length}`);
+    console.log(`   - Journal Entries: ${allJournalEntries.length}`);
   } catch (error) {
     console.error('❌ Seeding failed:', error);
     throw error;
