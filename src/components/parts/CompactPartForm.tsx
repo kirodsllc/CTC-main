@@ -153,50 +153,126 @@ export const CompactPartForm = ({ onSave, onCancel, editItem }: CompactPartFormP
     }
   }, [formData.subCategoryId]);
 
-  // Load full part data when editing
+  // Load full part data when editing - Step by step field mapping
   useEffect(() => {
     const loadPartData = async () => {
       if (editItem?.id) {
         setLoading(true);
         try {
           const response = await apiClient.getPart(editItem.id);
-          if (response.data) {
-            const part = response.data;
+          // Handle both wrapped and direct response formats
+          const part = response.data || response;
+          
+          if (part && part.id) {
+            console.log("Loading part data:", part); // Debug log
+            
+            // Step 1: Master Part No - Map correctly
+            const masterPartNo = part.master_part_no || "";
+            
+            // Step 2: Part Number - Map correctly
+            const partNo = part.part_no || "";
+            
+            // Step 3: Brand - Map correctly
+            const brandName = part.brand_name || "";
+            
+            // Step 4: Description - Map correctly
+            const description = part.description || "";
+            
+            // Step 5: Category - Find ID by name if needed
+            let categoryId = part.category_id || "";
+            const categoryName = part.category_name || "";
+            if (!categoryId && categoryName) {
+              const categoryMatch = categories.find(cat => cat.name === categoryName);
+              if (categoryMatch) {
+                categoryId = categoryMatch.id;
+              }
+            }
+            
+            // Step 6: Subcategory - Find ID by name if needed
+            let subCategoryId = part.subcategory_id || "";
+            const subCategoryName = part.subcategory_name || "";
+            if (!subCategoryId && subCategoryName) {
+              const subcategoryMatch = subcategories.find(sub => sub.name === subCategoryName);
+              if (subcategoryMatch) {
+                subCategoryId = subcategoryMatch.id;
+              }
+            }
+            
+            // Step 7: Application - Find ID by name if needed
+            let applicationId = part.application_id || "";
+            const applicationName = part.application_name || "";
+            if (!applicationId && applicationName) {
+              const applicationMatch = applications.find(app => app.name === applicationName);
+              if (applicationMatch) {
+                applicationId = applicationMatch.id;
+              }
+            }
+            
+            // Step 8: Prices - Map correctly (handle null/undefined)
+            const cost = part.cost !== null && part.cost !== undefined ? part.cost.toString() : "0.00";
+            const priceA = part.price_a !== null && part.price_a !== undefined ? part.price_a.toString() : "0.00";
+            const priceB = part.price_b !== null && part.price_b !== undefined ? part.price_b.toString() : "0.00";
+            const priceM = part.price_m !== null && part.price_m !== undefined ? part.price_m.toString() : "0.00";
+            
+            // Step 9: Other fields - Map correctly
+            const hsCode = part.hs_code || "";
+            const uom = part.uom || "NOS";
+            const weight = part.weight !== null && part.weight !== undefined ? part.weight.toString() : "";
+            const reOrderLevel = part.reorder_level !== null && part.reorder_level !== undefined ? part.reorder_level.toString() : "0";
+            const smc = part.smc || "";
+            const size = part.size || "";
+            const status = part.status === "active" ? "A" : "N";
+            const remarks = part.remarks || "";
+            
+            // Set form data step by step
             setFormData({
-              masterPartNo: part.master_part_no || "",
-              partNo: part.part_no || "",
-              brand: part.brand_name || "",
-              description: part.description || "",
-              category: part.category_name || "",
-              categoryId: part.category_id || "",
-              subCategory: part.subcategory_name || "",
-              subCategoryId: part.subcategory_id || "",
-              application: part.application_name || "",
-              applicationId: part.application_id || "",
-              hsCode: part.hs_code || "",
-              uom: part.uom || "NOS",
-              weight: part.weight?.toString() || "",
-              reOrderLevel: part.reorder_level?.toString() || "0",
-              cost: part.cost?.toString() || "0.00",
-              priceA: part.price_a?.toString() || "0.00",
-              priceB: part.price_b?.toString() || "0.00",
-              priceM: part.price_m?.toString() || "0.00",
+              // Step 1
+              masterPartNo: masterPartNo,
+              // Step 2
+              partNo: partNo,
+              // Step 3
+              brand: brandName,
+              // Step 4
+              description: description,
+              // Step 5
+              category: categoryName,
+              categoryId: categoryId,
+              // Step 6
+              subCategory: subCategoryName,
+              subCategoryId: subCategoryId,
+              // Step 7
+              application: applicationName,
+              applicationId: applicationId,
+              // Step 8 - Prices
+              cost: cost,
+              priceA: priceA,
+              priceB: priceB,
+              priceM: priceM,
+              // Step 9 - Other fields
+              hsCode: hsCode,
+              uom: uom,
+              weight: weight,
+              reOrderLevel: reOrderLevel,
               rackNo: "",
-              origin: "",
-              grade: "B",
-              status: part.status === "active" ? "A" : "N",
-              smc: part.smc || "",
-              size: part.size || "",
-              remarks: "",
+              origin: "", // Not in schema
+              grade: "B", // Not in schema
+              status: status,
+              smc: smc,
+              size: size,
+              remarks: remarks,
             });
+            
+            // Images
             setImageP1(part.image_p1 || null);
             setImageP2(part.image_p2 || null);
+            
+            console.log("Form data set:", { masterPartNo, partNo, brandName, description, categoryName, applicationName, cost, priceA, priceB, priceM }); // Debug log
           }
         } catch (error: any) {
           console.error("Error loading part data:", error);
           toast({
             title: "Error",
-            description: "Failed to load part details",
+            description: error.error || error.message || "Failed to load part details",
             variant: "destructive",
           });
         } finally {
@@ -210,7 +286,7 @@ export const CompactPartForm = ({ onSave, onCancel, editItem }: CompactPartFormP
     };
 
     loadPartData();
-  }, [editItem?.id]);
+  }, [editItem?.id, categories, subcategories, applications]);
 
   const handleInputChange = (field: keyof PartFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -700,12 +776,19 @@ export const CompactPartForm = ({ onSave, onCancel, editItem }: CompactPartFormP
                 <SelectValue placeholder="Select Origin" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="local" className="text-xs">Local</SelectItem>
-                <SelectItem value="import" className="text-xs">Import</SelectItem>
-                <SelectItem value="china" className="text-xs">China</SelectItem>
-                <SelectItem value="japan" className="text-xs">Japan</SelectItem>
-                <SelectItem value="germany" className="text-xs">Germany</SelectItem>
-                <SelectItem value="usa" className="text-xs">USA</SelectItem>
+                <SelectItem value="PRC" className="text-xs">PRC</SelectItem>
+                <SelectItem value="ITAL" className="text-xs">ITAL</SelectItem>
+                <SelectItem value="USA" className="text-xs">USA</SelectItem>
+                <SelectItem value="TURK" className="text-xs">TURK</SelectItem>
+                <SelectItem value="IND" className="text-xs">IND</SelectItem>
+                <SelectItem value="UK" className="text-xs">UK</SelectItem>
+                <SelectItem value="CHN" className="text-xs">CHN</SelectItem>
+                <SelectItem value="SAM" className="text-xs">SAM</SelectItem>
+                <SelectItem value="TAIW" className="text-xs">TAIW</SelectItem>
+                <SelectItem value="KOR" className="text-xs">KOR</SelectItem>
+                <SelectItem value="GER" className="text-xs">GER</SelectItem>
+                <SelectItem value="JAP" className="text-xs">JAP</SelectItem>
+                <SelectItem value="AFR" className="text-xs">AFR</SelectItem>
               </SelectContent>
             </Select>
           </div>

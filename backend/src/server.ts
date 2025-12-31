@@ -41,6 +41,17 @@ app.use(cors({
       if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
         callback(null, true);
       } else {
+        // In production, allow requests from same origin (when served through Nginx)
+        // This allows the frontend served from the same domain to access the API
+        const isProduction = process.env.NODE_ENV === 'production';
+        if (isProduction) {
+          // Allow if origin matches the server IP or domain
+          const serverOrigin = process.env.SERVER_ORIGIN || 'http://103.60.12.157';
+          if (origin.startsWith(serverOrigin) || origin.includes('103.60.12.157')) {
+            callback(null, true);
+            return;
+          }
+        }
         callback(new Error('Not allowed by CORS'));
       }
     }

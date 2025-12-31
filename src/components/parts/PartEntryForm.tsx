@@ -443,11 +443,19 @@ export const PartEntryForm = ({ onSave, selectedPart, onClearSelection }: PartEn
                     <SelectValue placeholder="Select Origin" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="local" className="text-xs">Local</SelectItem>
-                    <SelectItem value="import" className="text-xs">Import</SelectItem>
-                    <SelectItem value="china" className="text-xs">China</SelectItem>
-                    <SelectItem value="japan" className="text-xs">Japan</SelectItem>
-                    <SelectItem value="germany" className="text-xs">Germany</SelectItem>
+                    <SelectItem value="PRC" className="text-xs">PRC</SelectItem>
+                    <SelectItem value="ITAL" className="text-xs">ITAL</SelectItem>
+                    <SelectItem value="USA" className="text-xs">USA</SelectItem>
+                    <SelectItem value="TURK" className="text-xs">TURK</SelectItem>
+                    <SelectItem value="IND" className="text-xs">IND</SelectItem>
+                    <SelectItem value="UK" className="text-xs">UK</SelectItem>
+                    <SelectItem value="CHN" className="text-xs">CHN</SelectItem>
+                    <SelectItem value="SAM" className="text-xs">SAM</SelectItem>
+                    <SelectItem value="TAIW" className="text-xs">TAIW</SelectItem>
+                    <SelectItem value="KOR" className="text-xs">KOR</SelectItem>
+                    <SelectItem value="GER" className="text-xs">GER</SelectItem>
+                    <SelectItem value="JAP" className="text-xs">JAP</SelectItem>
+                    <SelectItem value="AFR" className="text-xs">AFR</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

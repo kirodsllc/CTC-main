@@ -34,13 +34,26 @@ const Parts = () => {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(false);
   const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsPage, setItemsPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+  const [totalItems, setTotalItems] = useState(0);
+  const [searchFilters, setSearchFilters] = useState({
+    search: '',
+    master_part_no: '',
+    part_no: '',
+    brand_name: '',
+    description: '',
+    category_name: 'all',
+    subcategory_name: 'all',
+    application_name: 'all',
+  });
 
   // Fetch parts from API
   useEffect(() => {
     const fetchParts = async () => {
       setLoading(true);
       try {
-        const response = await apiClient.getParts({ limit: 100 });
+        const response = await apiClient.getParts({ limit: 10000 });
         if (response.data) {
           // Transform API data to Part format
           const transformedParts: Part[] = response.data.map((p: any) => ({
@@ -69,51 +82,77 @@ const Parts = () => {
     fetchParts();
   }, []);
 
-  // Fetch items for ItemsListView
-  useEffect(() => {
-    const fetchItems = async () => {
-      setItemsLoading(true);
-      try {
-        const response = await apiClient.getParts({ limit: 1000 });
-        if (response.data && Array.isArray(response.data)) {
-          // Transform API data to Item format for ItemsListView
-          const transformedItems: Item[] = response.data.map((p: any) => {
-            // Debug log to check data structure
-            if (!p.category_name && p.category) {
-              console.warn('Part has category object but no category_name:', p);
-            }
-            return {
-              id: p.id,
-              masterPartNo: p.master_part_no || "",
-              partNo: p.part_no || "",
-              brand: p.brand_name || "",
-              description: p.description || "",
-              category: p.category_name || (p.category?.name) || "",
-              subCategory: p.subcategory_name || (p.subcategory?.name) || "",
-              application: p.application_name || (p.application?.name) || "",
-              status: p.status === "active" ? "Active" : "Inactive",
-              images: [p.image_p1, p.image_p2].filter(img => img && img.trim() !== ''),
-            };
-          });
-          setItems(transformedItems);
-        } else {
-          console.error('Invalid response structure:', response);
-          setItems([]);
-        }
-      } catch (error: any) {
-        console.error("Error fetching items:", error);
-        toast({
-          title: "Error",
-          description: error.error || "Failed to fetch items",
-          variant: "destructive",
+  // Fetch items for ItemsListView with pagination and filters
+  const fetchItems = async (page: number = itemsPage, limit: number = itemsPerPage, filters = searchFilters) => {
+    setItemsLoading(true);
+    try {
+      // Build API params with all filters
+      const params: any = { page, limit };
+      
+      // Add search filters
+      if (filters.search) params.search = filters.search;
+      if (filters.master_part_no) params.master_part_no = filters.master_part_no;
+      if (filters.part_no) params.part_no = filters.part_no;
+      if (filters.brand_name) params.brand_name = filters.brand_name;
+      if (filters.description) params.description = filters.description;
+      if (filters.category_name && filters.category_name !== 'all') params.category_name = filters.category_name;
+      if (filters.subcategory_name && filters.subcategory_name !== 'all') params.subcategory_name = filters.subcategory_name;
+      if (filters.application_name && filters.application_name !== 'all') params.application_name = filters.application_name;
+      
+      const response = await apiClient.getParts(params);
+      if (response.data && Array.isArray(response.data)) {
+        // Transform API data to Item format for ItemsListView
+        const transformedItems: Item[] = response.data.map((p: any) => {
+          return {
+            id: p.id,
+            masterPartNo: p.master_part_no || "",
+            partNo: p.part_no || "",
+            brand: p.brand_name || "",
+            description: p.description || "",
+            category: p.category_name || (p.category?.name) || "",
+            subCategory: p.subcategory_name || (p.subcategory?.name) || "",
+            application: p.application_name || (p.application?.name) || "",
+            status: p.status === "active" ? "Active" : "Inactive",
+            images: [p.image_p1, p.image_p2].filter(img => img && img.trim() !== ''),
+          };
         });
-      } finally {
-        setItemsLoading(false);
+        setItems(transformedItems);
+        
+        // Update total items from pagination info
+        if (response.pagination) {
+          setTotalItems(response.pagination.total);
+        } else {
+          // Fallback: if no pagination info, use items length (for backward compatibility)
+          setTotalItems(transformedItems.length);
+        }
+      } else {
+        console.error('Invalid response structure:', response);
+        setItems([]);
       }
-    };
+    } catch (error: any) {
+      console.error("Error fetching items:", error);
+      toast({
+        title: "Error",
+        description: error.error || "Failed to fetch items",
+        variant: "destructive",
+      });
+    } finally {
+      setItemsLoading(false);
+    }
+  };
 
-    fetchItems();
-  }, []);
+  useEffect(() => {
+    // Reset to page 1 when filters change
+    setItemsPage(1);
+    fetchItems(1, itemsPerPage, searchFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchFilters, itemsPerPage]);
+
+  useEffect(() => {
+    // Fetch when page changes (but not when filters change)
+    fetchItems(itemsPage, itemsPerPage, searchFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemsPage]);
 
   const handleSavePart = async (partData: any) => {
     try {
@@ -193,26 +232,7 @@ const Parts = () => {
       }
       
       // Always refresh items list after create/update to ensure latest data with categories/applications
-      try {
-        const itemsResponse = await apiClient.getParts({ limit: 1000 });
-        if (itemsResponse.data && Array.isArray(itemsResponse.data)) {
-          const transformedItems: Item[] = itemsResponse.data.map((p: any) => ({
-            id: p.id,
-            masterPartNo: p.master_part_no || "",
-            partNo: p.part_no || "",
-            brand: p.brand_name || "",
-            description: p.description || "",
-            category: p.category_name || (p.category?.name) || "",
-            subCategory: p.subcategory_name || (p.subcategory?.name) || "",
-            application: p.application_name || (p.application?.name) || "",
-            status: p.status === "active" ? "Active" : "Inactive",
-            images: [p.image_p1, p.image_p2].filter(img => img && img.trim() !== ''),
-          }));
-          setItems(transformedItems);
-        }
-      } catch (error) {
-        console.error("Error refreshing items:", error);
-      }
+      await fetchItems(itemsPage, itemsPerPage);
 
       toast({
         title: "Success",
@@ -270,33 +290,11 @@ const Parts = () => {
               Parts Entry
             </button>
             <button
-              onClick={async () => {
+              onClick={() => {
                 setTopTab("items");
                 setSelectedPart(null);
                 // Refresh items when switching to items tab
-                setItemsLoading(true);
-                try {
-                  const response = await apiClient.getParts({ limit: 1000 });
-                  if (response.data && Array.isArray(response.data)) {
-                    const transformedItems: Item[] = response.data.map((p: any) => ({
-                      id: p.id,
-                      masterPartNo: p.master_part_no || "",
-                      partNo: p.part_no || "",
-                      brand: p.brand_name || "",
-                      description: p.description || "",
-                      category: p.category_name || (p.category?.name) || "",
-                      subCategory: p.subcategory_name || (p.subcategory?.name) || "",
-                      application: p.application_name || (p.application?.name) || "",
-                      status: p.status === "active" ? "Active" : "Inactive",
-                      images: [p.image_p1, p.image_p2].filter(img => img && img.trim() !== ''),
-                    }));
-                    setItems(transformedItems);
-                  }
-                } catch (error: any) {
-                  console.error("Error fetching items:", error);
-                } finally {
-                  setItemsLoading(false);
-                }
+                fetchItems(itemsPage, itemsPerPage);
               }}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all text-xs font-medium",
@@ -461,6 +459,21 @@ const Parts = () => {
           {topTab === "items" && (
             <ItemsListView 
               items={items}
+              loading={itemsLoading}
+              currentPage={itemsPage}
+              itemsPerPage={itemsPerPage}
+              totalItems={totalItems}
+              searchFilters={searchFilters}
+              onFiltersChange={(filters) => {
+                setSearchFilters(filters);
+              }}
+              onPageChange={(page) => {
+                setItemsPage(page);
+              }}
+              onItemsPerPageChange={(limit) => {
+                setItemsPerPage(limit);
+                setItemsPage(1);
+              }}
               onEdit={(item) => {
                 setEditingItem(item);
                 setShowItemsForm(true);
@@ -475,22 +488,7 @@ const Parts = () => {
                   }
 
                   // Refresh items list
-                  const itemsResponse = await apiClient.getParts({ limit: 1000 });
-                  if (itemsResponse.data) {
-                    const transformedItems: Item[] = itemsResponse.data.map((p: any) => ({
-                      id: p.id,
-                      masterPartNo: p.master_part_no || "",
-                      partNo: p.part_no,
-                      brand: p.brand_name || "",
-                      description: p.description || "",
-                      category: p.category_name || (p.category?.name) || "",
-                      subCategory: p.subcategory_name || (p.subcategory?.name) || "",
-                      application: p.application_name || (p.application?.name) || "",
-                      status: p.status === "active" ? "Active" : "Inactive",
-                      images: [p.image_p1, p.image_p2].filter(Boolean),
-                    }));
-                    setItems(transformedItems);
-                  }
+                  await fetchItems(itemsPage, itemsPerPage);
 
                   toast({
                     title: "Success",
@@ -532,22 +530,7 @@ const Parts = () => {
                   }
 
                   // Refresh items list
-                  const itemsResponse = await apiClient.getParts({ limit: 1000 });
-                  if (itemsResponse.data) {
-                    const transformedItems: Item[] = itemsResponse.data.map((p: any) => ({
-                      id: p.id,
-                      masterPartNo: p.master_part_no || "",
-                      partNo: p.part_no,
-                      brand: p.brand_name || "",
-                      description: p.description || "",
-                      category: p.category_name || (p.category?.name) || "",
-                      subCategory: p.subcategory_name || (p.subcategory?.name) || "",
-                      application: p.application_name || (p.application?.name) || "",
-                      status: p.status === "active" ? "Active" : "Inactive",
-                      images: [p.image_p1, p.image_p2].filter(Boolean),
-                    }));
-                    setItems(transformedItems);
-                  }
+                  await fetchItems(itemsPage, itemsPerPage);
 
                   toast({
                     title: "Success",
@@ -624,22 +607,7 @@ const Parts = () => {
                   }
 
                   // Refresh items list
-                  const itemsResponse = await apiClient.getParts({ limit: 1000 });
-                  if (itemsResponse.data) {
-                    const transformedItems: Item[] = itemsResponse.data.map((p: any) => ({
-                      id: p.id,
-                      masterPartNo: p.master_part_no || "",
-                      partNo: p.part_no,
-                      brand: p.brand_name || "",
-                      description: p.description || "",
-                      category: p.category_name || (p.category?.name) || "",
-                      subCategory: p.subcategory_name || (p.subcategory?.name) || "",
-                      application: p.application_name || (p.application?.name) || "",
-                      status: p.status === "active" ? "Active" : "Inactive",
-                      images: [p.image_p1, p.image_p2].filter(Boolean),
-                    }));
-                    setItems(transformedItems);
-                  }
+                  await fetchItems(itemsPage, itemsPerPage);
 
                   toast({
                     title: "Success",
