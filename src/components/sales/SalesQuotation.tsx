@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { apiClient } from "@/lib/api";
 import {
   Table,
   TableBody,
@@ -21,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Search, Eye, FileText, ArrowRight, X, Package, Trash2, Pencil, ShoppingCart, Printer } from "lucide-react";
+import { Plus, Search, Eye, FileText, ArrowRight, X, Package, Trash2, Pencil, ShoppingCart, Printer, RefreshCw } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,14 +69,6 @@ interface Quotation {
   notes: string;
 }
 
-// Parts data for selection
-const availableParts: { id: string; partNo: string; description: string; price: number; stock: number }[] = [
-  { id: "1", partNo: "TEST001", description: "High quality brake pad for vehicles", price: 150.00, stock: 50 },
-  { id: "2", partNo: "TEST002", description: "Premium air filter element", price: 250.00, stock: 30 },
-  { id: "3", partNo: "ENG-001", description: "Engine oil filter for diesel engines", price: 120.00, stock: 100 },
-  { id: "4", partNo: "SUS-001", description: "Suspension shock absorber front", price: 400.00, stock: 25 },
-];
-
 export const SalesQuotation = () => {
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -88,6 +81,10 @@ export const SalesQuotation = () => {
   const [selectedQuotation, setSelectedQuotation] = useState<Quotation | null>(null);
   const [printQuotation, setPrintQuotation] = useState<Quotation | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
+  
+  // Parts data from database
+  const [availableParts, setAvailableParts] = useState<{ id: string; partNo: string; description: string; price: number; stock: number }[]>([]);
+  const [loadingParts, setLoadingParts] = useState(false);
   const [formData, setFormData] = useState<{
     quotationNo: string;
     quotationDate: string;
@@ -110,6 +107,168 @@ export const SalesQuotation = () => {
     notes: "",
   });
 
+  // Fetch parts from database
+  useEffect(() => {
+    if (!isFormOpen) return; // Only fetch when form is open
+    
+    const fetchParts = async () => {
+      setLoadingParts(true);
+      console.log('Fetching parts from database...');
+      try {
+        // Fetch parts and stock balances in parallel
+        const [partsResponse, balancesResponse] = await Promise.all([
+          apiClient.getParts({ 
+            status: 'active',
+            limit: 10000, // Increased limit to get all parts
+            page: 1 
+          }),
+          apiClient.getStockBalances({ 
+            limit: 10000 
+          }).catch((err) => {
+            console.warn('Error fetching stock balances:', err);
+            return { data: [], error: null };
+          })
+        ]);
+        
+        console.log('API Responses:', {
+          partsResponse: partsResponse,
+          balancesResponse: balancesResponse
+        });
+
+        if (partsResponse.error) {
+          console.error('Error fetching parts:', partsResponse.error);
+          toast({
+            title: "Error",
+            description: partsResponse.error || "Failed to load parts from database",
+            variant: "destructive",
+          });
+          setAvailableParts([]);
+          return;
+        }
+
+        // Handle both response formats: { data: [...] } or direct array
+        let partsData: any[] = [];
+        if (Array.isArray(partsResponse)) {
+          partsData = partsResponse;
+        } else if (partsResponse.data && Array.isArray(partsResponse.data)) {
+          partsData = partsResponse.data;
+        } else if (partsResponse.pagination && partsResponse.data) {
+          partsData = partsResponse.data;
+        }
+        
+        let balancesData: any[] = [];
+        if (Array.isArray(balancesResponse)) {
+          balancesData = balancesResponse;
+        } else if (balancesResponse.data && Array.isArray(balancesResponse.data)) {
+          balancesData = balancesResponse.data;
+        } else if (balancesResponse.pagination && balancesResponse.data) {
+          balancesData = balancesResponse.data;
+        }
+        
+        console.log('Parts data received:', { 
+          partsCount: partsData.length, 
+          balancesCount: balancesData.length,
+          samplePart: partsData[0] 
+        });
+
+        if (!Array.isArray(partsData)) {
+          console.error('Invalid parts response format:', partsData);
+          console.log('Response structure:', { 
+            hasData: !!partsResponse.data, 
+            dataType: typeof partsResponse.data,
+            response: partsResponse 
+          });
+          setAvailableParts([]);
+          toast({
+            title: "Data Format Error",
+            description: "Received invalid data format from server",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        // Create balance map for stock quantities (sum across all stores)
+        const balanceMap: Record<string, number> = {};
+        if (Array.isArray(balancesData)) {
+          balancesData.forEach((b: any) => {
+            const partId = b.part_id || b.partId;
+            if (partId) {
+              // Sum quantities across all stores for total available stock
+              balanceMap[partId] = (balanceMap[partId] || 0) + (parseFloat(b.quantity) || parseFloat(b.qty) || 0);
+            }
+          });
+        }
+
+        // Transform API data to component format
+        console.log('Processing parts:', partsData.length, 'parts');
+        console.log('Sample part data:', partsData[0]);
+        
+        const transformedParts = partsData
+          .map((p: any) => {
+            // Get part number - try multiple field names
+            const partNo = String(p.part_no || p.partNo || p.part_number || '').trim();
+            const description = String(p.description || partNo || 'No description').trim();
+            const price = parseFloat(p.price_a || p.priceA || p.price || p.cost || 0);
+            const stock = balanceMap[p.id] || 0;
+            
+            if (!partNo) {
+              console.warn('Part has no part number:', p.id, p);
+            }
+            
+            return {
+              id: String(p.id),
+              partNo: partNo,
+              description: description,
+              price: isNaN(price) ? 0 : price,
+              stock: isNaN(stock) ? 0 : Math.max(0, stock),
+            };
+          })
+          .filter((p: any) => {
+            // Only include parts with valid part numbers
+            const hasPartNo = p.partNo && p.partNo.trim() !== '';
+            if (!hasPartNo) {
+              console.warn('Filtered out part without part number:', p);
+            }
+            return hasPartNo;
+          });
+        
+        console.log('After transformation:', transformedParts.length, 'parts');
+        if (transformedParts.length > 0) {
+          console.log('Sample transformed part:', transformedParts[0]);
+        } else {
+          console.warn('No parts after transformation. Raw data sample:', partsData[0]);
+        }
+        
+        setAvailableParts(transformedParts);
+        
+        if (transformedParts.length === 0) {
+          console.warn('No parts found after transformation');
+          toast({
+            title: "No Parts Found",
+            description: "No active parts found in the database. Please add parts first.",
+            variant: "default",
+          });
+        } else {
+          console.log(`Successfully loaded ${transformedParts.length} parts`);
+        }
+      } catch (error: any) {
+        console.error('Error fetching parts:', error);
+        toast({
+          title: "Error",
+          description: error.message || "Failed to fetch parts from database",
+          variant: "destructive",
+        });
+      } finally {
+        setLoadingParts(false);
+      }
+    };
+
+    // Fetch parts when component mounts or when form opens
+    if (isFormOpen) {
+      fetchParts();
+    }
+  }, [isFormOpen]);
+
   // Generate quotation number
   const generateQuotationNo = () => {
     const prefix = "SQ";
@@ -119,14 +278,16 @@ export const SalesQuotation = () => {
 
   // Filter parts based on search
   const filteredParts = useMemo(() => {
-    if (!itemSearchTerm) return availableParts;
-    const term = itemSearchTerm.toLowerCase();
+    if (!itemSearchTerm || itemSearchTerm.trim() === "") {
+      return availableParts;
+    }
+    const term = itemSearchTerm.toLowerCase().trim();
     return availableParts.filter(
       (p) =>
-        p.partNo.toLowerCase().includes(term) ||
-        p.description.toLowerCase().includes(term)
+        p.partNo?.toLowerCase().includes(term) ||
+        p.description?.toLowerCase().includes(term)
     );
-  }, [itemSearchTerm]);
+  }, [itemSearchTerm, availableParts]);
 
   // Filter quotations
   const filteredQuotations = quotations.filter((item) =>
@@ -136,12 +297,22 @@ export const SalesQuotation = () => {
 
   // Calculate total
   const calculateTotal = () => {
-    return selectedItems.reduce((sum, item) => sum + item.total, 0);
+    const total = selectedItems.reduce((sum, item) => {
+      const itemTotal = item.quantity * item.unitPrice;
+      return sum + itemTotal;
+    }, 0);
+    return Math.round(total * 100) / 100; // Round to 2 decimal places
   };
 
   // Handle item selection
   const handleToggleItem = (part: typeof availableParts[0], checked: boolean) => {
     if (checked) {
+      // Check if item already exists
+      const existingItem = selectedItems.find((i) => i.id === part.id);
+      if (existingItem) {
+        return; // Silently return if already selected
+      }
+      
       const newItem: QuotationItem = {
         id: part.id,
         partNo: part.partNo,
@@ -158,10 +329,11 @@ export const SalesQuotation = () => {
 
   // Update item quantity
   const handleQuantityChange = (itemId: string, quantity: number) => {
+    const qty = Math.max(1, quantity); // Ensure minimum quantity of 1
     setSelectedItems(
       selectedItems.map((item) =>
         item.id === itemId
-          ? { ...item, quantity, total: item.unitPrice * quantity }
+          ? { ...item, quantity: qty, total: Math.round(item.unitPrice * qty * 100) / 100 }
           : item
       )
     );
@@ -175,10 +347,14 @@ export const SalesQuotation = () => {
   // Handle new quotation
   const handleNewQuotation = () => {
     setEditingQuotationId(null);
+    const today = new Date();
+    const validUntilDate = new Date(today);
+    validUntilDate.setDate(today.getDate() + 30);
+    
     setFormData({
       quotationNo: generateQuotationNo(),
-      quotationDate: new Date().toISOString().split("T")[0],
-      validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+      quotationDate: today.toISOString().split("T")[0],
+      validUntil: validUntilDate.toISOString().split("T")[0],
       status: "draft",
       customerName: "",
       customerEmail: "",
@@ -187,6 +363,7 @@ export const SalesQuotation = () => {
       notes: "",
     });
     setSelectedItems([]);
+    setItemSearchTerm("");
     setIsFormOpen(true);
   };
 
@@ -265,9 +442,9 @@ export const SalesQuotation = () => {
 
   // Handle form submit
   const handleSubmit = () => {
-    if (!formData.customerName) {
+    if (!formData.customerName || formData.customerName.trim() === "") {
       toast({
-        title: "Error",
+        title: "Validation Error",
         description: "Customer name is required",
         variant: "destructive",
       });
@@ -276,8 +453,19 @@ export const SalesQuotation = () => {
 
     if (selectedItems.length === 0) {
       toast({
-        title: "Error",
-        description: "Please select at least one item",
+        title: "Validation Error",
+        description: "Please select at least one item to create a quotation",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate all items have quantity > 0
+    const invalidItems = selectedItems.filter(item => item.quantity <= 0);
+    if (invalidItems.length > 0) {
+      toast({
+        title: "Validation Error",
+        description: "All selected items must have a quantity greater than 0",
         variant: "destructive",
       });
       return;
@@ -299,7 +487,7 @@ export const SalesQuotation = () => {
                 validUntil: formData.validUntil,
                 totalAmount: calculateTotal(),
                 status: formData.status,
-                items: selectedItems,
+                items: [...selectedItems], // Create a copy
                 notes: formData.notes,
               }
             : q
@@ -307,6 +495,7 @@ export const SalesQuotation = () => {
       );
       setIsFormOpen(false);
       setEditingQuotationId(null);
+      setSelectedItems([]);
       toast({
         title: "Quotation Updated",
         description: `Quotation ${formData.quotationNo} has been updated successfully.`,
@@ -324,15 +513,27 @@ export const SalesQuotation = () => {
         validUntil: formData.validUntil,
         totalAmount: calculateTotal(),
         status: formData.status,
-        items: selectedItems,
+        items: [...selectedItems], // Create a copy
         notes: formData.notes,
       };
 
       setQuotations([newQuotation, ...quotations]);
       setIsFormOpen(false);
+      setSelectedItems([]);
+      setFormData({
+        quotationNo: generateQuotationNo(),
+        quotationDate: new Date().toISOString().split("T")[0],
+        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        status: "draft",
+        customerName: "",
+        customerEmail: "",
+        customerPhone: "",
+        customerAddress: "",
+        notes: "",
+      });
       toast({
         title: "Quotation Created",
-        description: `Quotation ${newQuotation.quotationNo} has been created successfully.`,
+        description: `Quotation ${newQuotation.quotationNo} has been created successfully with ${newQuotation.items.length} item(s).`,
       });
     }
   };
@@ -457,9 +658,85 @@ export const SalesQuotation = () => {
 
             {/* Item Selection Section */}
             <div className="border rounded-lg p-4 mb-6">
-              <div className="flex items-center gap-2 mb-4">
-                <Package className="w-4 h-4 text-primary" />
-                <h3 className="font-medium">Select Items</h3>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Package className="w-4 h-4 text-primary" />
+                  <h3 className="font-medium">Select Items</h3>
+                  <Badge variant="outline" className="text-xs">
+                    {loadingParts ? "Loading..." : `${availableParts.length} parts available`}
+                  </Badge>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    setLoadingParts(true);
+                    try {
+                      const [partsResponse, balancesResponse] = await Promise.all([
+                        apiClient.getParts({ 
+                          status: 'active',
+                          limit: 1000,
+                          page: 1 
+                        }),
+                        apiClient.getStockBalances({ 
+                          limit: 1000 
+                        }).catch(() => ({ data: [], error: null }))
+                      ]);
+
+                      const partsData = partsResponse.data || partsResponse || [];
+                      const balancesData = balancesResponse.data || balancesResponse || [];
+
+                      const balanceMap: Record<string, number> = {};
+                      if (Array.isArray(balancesData)) {
+                        balancesData.forEach((b: any) => {
+                          const partId = b.part_id || b.partId;
+                          if (partId) {
+                            balanceMap[partId] = (balanceMap[partId] || 0) + (parseFloat(b.quantity) || parseFloat(b.qty) || 0);
+                          }
+                        });
+                      }
+
+                      const transformedParts = partsData
+                        .filter((p: any) => p.status === 'active' || !p.status)
+                        .map((p: any) => ({
+                          id: p.id,
+                          partNo: p.part_no || p.partNo || '',
+                          description: p.description || p.part_no || p.partNo || 'No description',
+                          price: parseFloat(p.price_a || p.priceA || p.cost || 0),
+                          stock: balanceMap[p.id] || 0,
+                        }))
+                        .filter((p: any) => p.partNo);
+
+                      setAvailableParts(transformedParts);
+                      if (transformedParts.length > 0) {
+                        toast({
+                          title: "Parts Refreshed",
+                          description: `Loaded ${transformedParts.length} parts from database.`,
+                        });
+                      } else {
+                        toast({
+                          title: "No Parts Found",
+                          description: "No active parts found in the database.",
+                          variant: "default",
+                        });
+                      }
+                    } catch (error: any) {
+                      console.error('Error refreshing parts:', error);
+                      toast({
+                        title: "Error",
+                        description: "Failed to refresh parts",
+                        variant: "destructive",
+                      });
+                    } finally {
+                      setLoadingParts(false);
+                    }
+                  }}
+                  disabled={loadingParts}
+                  className="h-8 text-xs gap-1"
+                >
+                  <RefreshCw className={`w-3 h-3 ${loadingParts ? "animate-spin" : ""}`} />
+                  {loadingParts ? "Loading..." : "Refresh"}
+                </Button>
               </div>
 
               {/* Item Search */}
@@ -476,31 +753,52 @@ export const SalesQuotation = () => {
               {/* Available Parts */}
               <ScrollArea className="h-48 border rounded-md">
                 <div className="p-2 space-y-1">
-                  {filteredParts.map((part) => {
-                    const isSelected = selectedItems.some((i) => i.id === part.id);
-                    return (
-                      <div
-                        key={part.id}
-                        className={`flex items-center gap-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer ${
-                          isSelected ? "bg-primary/10" : ""
-                        }`}
-                        onClick={() => handleToggleItem(part, !isSelected)}
-                      >
-                        <Checkbox
-                          checked={isSelected}
-                          onCheckedChange={(checked) =>
-                            handleToggleItem(part, checked as boolean)
-                          }
-                        />
-                        <div className="flex-1 grid grid-cols-4 gap-2 text-sm">
-                          <span className="font-medium">{part.partNo}</span>
-                          <span className="text-muted-foreground">{part.description}</span>
-                          <span className="text-center text-primary font-medium">{part.stock} pcs</span>
-                          <span className="text-right">Rs {part.price.toFixed(2)}</span>
+                  {loadingParts ? (
+                    <div className="text-center py-4 text-muted-foreground text-sm">
+                      Loading parts from database...
+                    </div>
+                  ) : availableParts.length === 0 ? (
+                    <div className="text-center py-4 text-muted-foreground text-sm">
+                      No parts available. Please add parts to the system first.
+                    </div>
+                  ) : filteredParts.length === 0 ? (
+                    <div className="text-center py-4 text-muted-foreground text-sm">
+                      No parts found matching "{itemSearchTerm}". Try a different search term.
+                    </div>
+                  ) : (
+                    filteredParts.map((part) => {
+                      const isSelected = selectedItems.some((i) => i.id === part.id);
+                      return (
+                        <div
+                          key={part.id}
+                          className={`flex items-center gap-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors ${
+                            isSelected ? "bg-primary/10 border border-primary/20" : ""
+                          }`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleToggleItem(part, !isSelected);
+                          }}
+                        >
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => {
+                                handleToggleItem(part, checked as boolean);
+                              }}
+                            />
+                          </div>
+                          <div className="flex-1 grid grid-cols-4 gap-2 text-sm">
+                            <span className="font-medium">{part.partNo}</span>
+                            <span className="text-muted-foreground line-clamp-1">{part.description}</span>
+                            <span className={`text-center font-medium ${part.stock > 0 ? "text-primary" : "text-destructive"}`}>
+                              {part.stock} pcs
+                            </span>
+                            <span className="text-right font-medium">Rs {part.price.toFixed(2)}</span>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </ScrollArea>
 
@@ -531,17 +829,23 @@ export const SalesQuotation = () => {
                               type="number"
                               min="1"
                               value={item.quantity}
-                              onChange={(e) =>
-                                handleQuantityChange(item.id, parseInt(e.target.value) || 1)
-                              }
-                              className="w-20 h-8"
+                              onChange={(e) => {
+                                const value = parseInt(e.target.value) || 1;
+                                handleQuantityChange(item.id, value);
+                              }}
+                              onBlur={(e) => {
+                                if (!e.target.value || parseInt(e.target.value) < 1) {
+                                  handleQuantityChange(item.id, 1);
+                                }
+                              }}
+                              className="w-20 h-8 text-center"
                             />
                           </TableCell>
                           <TableCell className="text-right">
                             Rs {item.unitPrice.toFixed(2)}
                           </TableCell>
-                          <TableCell className="text-right font-medium">
-                            Rs {item.total.toFixed(2)}
+                          <TableCell className="text-right font-semibold text-primary">
+                            Rs {(item.quantity * item.unitPrice).toFixed(2)}
                           </TableCell>
                           <TableCell>
                             <Button
@@ -555,11 +859,11 @@ export const SalesQuotation = () => {
                           </TableCell>
                         </TableRow>
                       ))}
-                      <TableRow>
-                        <TableCell colSpan={4} className="text-right font-medium">
+                      <TableRow className="bg-muted/30">
+                        <TableCell colSpan={4} className="text-right font-bold">
                           Grand Total:
                         </TableCell>
-                        <TableCell className="text-right font-bold text-primary">
+                        <TableCell className="text-right font-bold text-primary text-lg">
                           Rs {calculateTotal().toFixed(2)}
                         </TableCell>
                         <TableCell></TableCell>
@@ -581,14 +885,46 @@ export const SalesQuotation = () => {
               />
             </div>
 
+            {/* Summary Card */}
+            {selectedItems.length > 0 && (
+              <div className="mb-6 p-4 bg-primary/5 border border-primary/20 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Total Items</p>
+                    <p className="text-2xl font-bold text-foreground">{selectedItems.length}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-muted-foreground">Grand Total</p>
+                    <p className="text-2xl font-bold text-primary">Rs {calculateTotal().toFixed(2)}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Action Buttons */}
             <div className="flex gap-3">
-              <Button onClick={handleSubmit}>
+              <Button 
+                onClick={handleSubmit}
+                disabled={selectedItems.length === 0 || !formData.customerName.trim()}
+                className="bg-primary hover:bg-primary/90"
+              >
                 {editingQuotationId ? "Update Quotation" : "Create Quotation"}
               </Button>
               <Button variant="outline" onClick={() => {
                 setIsFormOpen(false);
                 setEditingQuotationId(null);
+                setSelectedItems([]);
+                setFormData({
+                  quotationNo: generateQuotationNo(),
+                  quotationDate: new Date().toISOString().split("T")[0],
+                  validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+                  status: "draft",
+                  customerName: "",
+                  customerEmail: "",
+                  customerPhone: "",
+                  customerAddress: "",
+                  notes: "",
+                });
               }}>
                 Cancel
               </Button>

@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
+import { apiClient } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -150,15 +152,24 @@ export const SalesInvoice = () => {
   // Inline items state - matching reference design
   const [inlineItems, setInlineItems] = useState<InlineItemRow[]>([]);
 
-  // Alternate Parts/Brands Dialog
-  const [showAlternateParts, setShowAlternateParts] = useState(false);
-  const [showAlternateBrands, setShowAlternateBrands] = useState(false);
-  const [currentItemForAlternate, setCurrentItemForAlternate] = useState<InlineItemRow | null>(null);
+  // Parts data from API
+  const [parts, setParts] = useState<PartItem[]>([]);
+  const [partsLoading, setPartsLoading] = useState(false);
+  const [partsSearchTerm, setPartsSearchTerm] = useState<Record<string, string>>({});
+  const [showPartsDropdown, setShowPartsDropdown] = useState<Record<string, boolean>>({});
+  const [dropdownPosition, setDropdownPosition] = useState<Record<string, { top: number; left: number; width: number }>>({});
+  const inputRefs = useRef<Record<string, HTMLInputElement>>({});
+  const dropdownRefs = useRef<Record<string, HTMLDivElement>>({});
+  const isClickingDropdown = useRef<Record<string, boolean>>({});
+
+  // Accounts for payment
+  const [accounts, setAccounts] = useState<{ id: string; name: string; type: string; code?: string }[]>([]);
+  const [selectedAccount, setSelectedAccount] = useState("");
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
+  const [receivedAmount, setReceivedAmount] = useState(0);
 
   // Payment fields
   const [discount, setDiscount] = useState(0);
-  const [receivedCash, setReceivedCash] = useState(0);
-  const [receivedBank, setReceivedBank] = useState(0);
   const [taxType, setTaxType] = useState("Without GST");
   const [deliveredTo, setDeliveredTo] = useState("");
   const [remarks, setRemarks] = useState("");
@@ -219,7 +230,8 @@ export const SalesInvoice = () => {
       rate: 0,
       showDetails: false,
     };
-    setInlineItems([...inlineItems, newItem]);
+    // Add new item at the top (first position), existing items move down
+    setInlineItems([newItem, ...inlineItems]);
   };
 
   // Update inline item
@@ -230,9 +242,9 @@ export const SalesInvoice = () => {
           const updated = { ...item, [field]: value };
           // If part changed, update rate from part data
           if (field === "selectedPartId" && value) {
-            const part = mockParts.find((p) => p.id === value);
+            const part = parts.find((p) => p.id === value);
             if (part) {
-              updated.rate = part.price;
+              updated.rate = part.price || part.lastSalePrice || 0;
             }
           }
           return updated;
@@ -247,9 +259,193 @@ export const SalesInvoice = () => {
     setInlineItems((prev) => prev.filter((item) => item.id !== id));
   };
 
+  // Debounce timer for parts search
+  const partsSearchDebounceRef = useRef<Record<string, NodeJS.Timeout>>({});
+
+  // Fetch parts from API (lazy load - only when needed)
+  const fetchParts = async (searchTerm: string = "") => {
+    // Don't fetch if already loaded and no search term (unless explicitly requested)
+    if (parts.length > 0 && !searchTerm && parts.length >= 50) {
+      return;
+    }
+    
+    setPartsLoading(true);
+    try {
+      const params: any = { 
+        limit: 100, // Reduced limit for better performance
+        status: 'active' 
+      };
+      
+      if (searchTerm && searchTerm.length >= 2) {
+        params.part_no = searchTerm;
+        params.description = searchTerm;
+      }
+      
+      const response = await apiClient.getParts(params);
+      if (response.data && Array.isArray(response.data)) {
+        const transformedParts: PartItem[] = response.data.map((p: any) => ({
+          id: p.id,
+          partNo: p.part_no || "",
+          description: p.description || "",
+          category: p.category_name || "",
+          price: p.price_a || p.cost || 0,
+          stockQty: p.stockQty || 0,
+          reservedQty: p.reservedQty || 0,
+          availableQty: (p.stockQty || 0) - (p.reservedQty || 0),
+          lastSalePrice: p.price_a || p.lastSalePrice || 0,
+          grade: p.grade || "A",
+          brands: p.brand_name ? [{ id: p.brand_id || "", name: p.brand_name }] : [],
+        }));
+        
+        if (searchTerm) {
+          // For search, replace parts with search results
+          setParts(transformedParts);
+        } else {
+          setParts(transformedParts);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching parts:", error);
+      if (parts.length === 0) {
+        // Only show error and use demo data if no parts loaded
+        toast({
+          title: "Error",
+          description: "Failed to load parts. Using demo data.",
+          variant: "destructive",
+        });
+        setParts(mockParts);
+      }
+    } finally {
+      setPartsLoading(false);
+    }
+  };
+
+  // Cleanup debounce timers on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(partsSearchDebounceRef.current).forEach(timer => {
+        if (timer) clearTimeout(timer);
+      });
+    };
+  }, []);
+
+  // Update dropdown position on scroll
+  useEffect(() => {
+    const updatePositions = () => {
+      Object.keys(showPartsDropdown).forEach((itemId) => {
+        if (showPartsDropdown[itemId] && inputRefs.current[itemId]) {
+          const input = inputRefs.current[itemId];
+          const rect = input.getBoundingClientRect();
+          setDropdownPosition(prev => ({
+            ...prev,
+            [itemId]: {
+              top: rect.bottom + window.scrollY + 4,
+              left: rect.left + window.scrollX,
+              width: rect.width,
+            }
+          }));
+        }
+      });
+    };
+
+    if (Object.keys(showPartsDropdown).some(key => showPartsDropdown[key])) {
+      window.addEventListener('scroll', updatePositions, true);
+      window.addEventListener('resize', updatePositions);
+      return () => {
+        window.removeEventListener('scroll', updatePositions, true);
+        window.removeEventListener('resize', updatePositions);
+      };
+    }
+  }, [showPartsDropdown]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      Object.keys(showPartsDropdown).forEach((itemId) => {
+        if (showPartsDropdown[itemId] && inputRefs.current[itemId]) {
+          const input = inputRefs.current[itemId];
+          if (!input.contains(event.target as Node)) {
+            setShowPartsDropdown(prev => ({ ...prev, [itemId]: false }));
+          }
+        }
+      });
+    };
+
+    if (Object.keys(showPartsDropdown).some(key => showPartsDropdown[key])) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [showPartsDropdown]);
+
+  // Fetch accounts from Accounting API (Accounts page)
+  useEffect(() => {
+    const fetchAccounts = async () => {
+      try {
+        setLoadingAccounts(true);
+        console.log("Fetching accounts from Accounting API...");
+        
+        // Fetch accounts from Accounting API (Accounts page)
+        // Note: Backend expects "Active" with capital A
+        const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+        const response = await fetch(`${API_URL}/api/accounting/accounts?status=Active`);
+        
+        console.log("Accounts API response status:", response.status);
+        
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({ error: response.statusText }));
+          console.error("Error fetching accounts:", error);
+          setAccounts([]);
+          return;
+        }
+        
+        // Backend returns accounts directly as an array
+        const accountsData = await response.json();
+        console.log("Raw accounts data:", accountsData);
+        console.log("Accounts count:", Array.isArray(accountsData) ? accountsData.length : 0);
+        
+        if (!Array.isArray(accountsData)) {
+          console.error("Invalid response format - expected array, got:", typeof accountsData);
+          setAccounts([]);
+          return;
+        }
+        
+        if (accountsData.length === 0) {
+          console.log("No active accounts found. Please add accounts in Accounting → Accounts.");
+          setAccounts([]);
+          return;
+        }
+        
+        // Transform accounts to the format needed for Sales Invoice
+        const transformedAccounts = accountsData
+          .filter((acc: any) => acc && acc.id && acc.name) // Filter out invalid accounts
+          .map((acc: any) => {
+            const account = {
+              id: acc.id,
+              name: acc.name || "",
+              type: acc.subgroup?.mainGroup?.name || "General",
+              code: acc.code || "",
+            };
+            return account;
+          });
+        
+        console.log("Successfully loaded", transformedAccounts.length, "accounts:", transformedAccounts);
+        setAccounts(transformedAccounts);
+      } catch (error) {
+        console.error("Error loading accounts from Accounting API:", error);
+        setAccounts([]);
+      } finally {
+        setLoadingAccounts(false);
+      }
+    };
+
+    fetchAccounts();
+  }, []);
+
   // Get part data for inline item
   const getPartForItem = (partId: string) => {
-    return mockParts.find((p) => p.id === partId);
+    return parts.find((p) => p.id === partId);
   };
 
   // Calculate line total for inline item
@@ -269,7 +465,7 @@ export const SalesInvoice = () => {
 
   // Calculate due amount
   const calculateDueAmount = () => {
-    return calculateAmountAfterDiscount() - receivedCash - receivedBank;
+    return calculateAmountAfterDiscount() - receivedAmount;
   };
 
   // Create new invoice
@@ -324,9 +520,10 @@ export const SalesInvoice = () => {
       overallDiscountType: "fixed",
       tax: 0,
       grandTotal,
-      paidAmount: receivedCash + receivedBank,
+      paidAmount: receivedAmount,
       status: "pending",
-      paymentStatus: receivedCash + receivedBank >= grandTotal ? "paid" : receivedCash + receivedBank > 0 ? "partial" : "unpaid",
+      paymentStatus: receivedAmount >= grandTotal ? "paid" : receivedAmount > 0 ? "partial" : "unpaid",
+      account: selectedAccount || undefined,
       deliveryLog: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -353,8 +550,8 @@ export const SalesInvoice = () => {
     setSelectedCustomerId("");
     setInlineItems([]);
     setDiscount(0);
-    setReceivedCash(0);
-    setReceivedBank(0);
+    setReceivedAmount(0);
+    setSelectedAccount("");
     setTaxType("Without GST");
     setDeliveredTo("");
     setRemarks("");
@@ -759,21 +956,181 @@ export const SalesInvoice = () => {
                           <TableRow key={item.id}>
                             <TableCell>
                               <div className="space-y-2">
-                                <Select
-                                  value={item.selectedPartId}
-                                  onValueChange={(v) => handleUpdateInlineItem(item.id, "selectedPartId", v)}
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select..." />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {mockParts.map((p) => (
-                                      <SelectItem key={p.id} value={p.id}>
-                                        {p.partNo} - {p.description}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                <div className="relative">
+                                  <Input
+                                    ref={(el) => {
+                                      if (el) inputRefs.current[item.id] = el;
+                                    }}
+                                    placeholder="Select part..."
+                                    value={(() => {
+                                      // If user is typing (search term exists and is not empty), show search term
+                                      const searchValue = partsSearchTerm[item.id];
+                                      if (searchValue !== undefined && searchValue !== "") {
+                                        return searchValue;
+                                      }
+                                      
+                                      // Otherwise, if a part is selected, show the part name
+                                      if (item.selectedPartId) {
+                                        const selectedPart = getPartForItem(item.selectedPartId);
+                                        if (selectedPart) {
+                                          const partNo = selectedPart.partNo || "";
+                                          const description = selectedPart.description || "";
+                                          return description ? `${partNo} - ${description}` : partNo;
+                                        }
+                                      }
+                                      
+                                      // Otherwise, show empty (placeholder will show)
+                                      return "";
+                                    })()}
+                                    onChange={(e) => {
+                                      const searchValue = e.target.value;
+                                      setPartsSearchTerm(prev => ({ ...prev, [item.id]: searchValue }));
+                                      
+                                      // Calculate position
+                                      const input = inputRefs.current[item.id];
+                                      if (input) {
+                                        const rect = input.getBoundingClientRect();
+                                        setDropdownPosition(prev => ({
+                                          ...prev,
+                                          [item.id]: {
+                                            top: rect.bottom + window.scrollY + 4,
+                                            left: rect.left + window.scrollX,
+                                            width: rect.width,
+                                          }
+                                        }));
+                                      }
+                                      
+                                      setShowPartsDropdown(prev => ({ ...prev, [item.id]: true }));
+                                      
+                                      // Clear existing debounce timer for this item
+                                      if (partsSearchDebounceRef.current[item.id]) {
+                                        clearTimeout(partsSearchDebounceRef.current[item.id]);
+                                      }
+                                      
+                                      // Debounced search
+                                      partsSearchDebounceRef.current[item.id] = setTimeout(() => {
+                                        if (searchValue.length >= 2) {
+                                          fetchParts(searchValue);
+                                        } else if (searchValue.length === 0) {
+                                          // Reset to initial load when cleared
+                                          fetchParts("");
+                                        }
+                                      }, 300);
+                                    }}
+                                    onFocus={() => {
+                                      const input = inputRefs.current[item.id];
+                                      if (input) {
+                                        const rect = input.getBoundingClientRect();
+                                        setDropdownPosition(prev => ({
+                                          ...prev,
+                                          [item.id]: {
+                                            top: rect.bottom + window.scrollY + 4,
+                                            left: rect.left + window.scrollX,
+                                            width: rect.width,
+                                          }
+                                        }));
+                                      }
+                                      setShowPartsDropdown(prev => ({ ...prev, [item.id]: true }));
+                                      if (parts.length === 0) {
+                                        fetchParts();
+                                      }
+                                    }}
+                                    onBlur={(e) => {
+                                      // If we're clicking on the dropdown, don't close it
+                                      if (isClickingDropdown.current[item.id]) {
+                                        isClickingDropdown.current[item.id] = false;
+                                        return;
+                                      }
+                                      
+                                      // Delay to allow click on dropdown item
+                                      setTimeout(() => {
+                                        // Only close if we're not clicking on dropdown
+                                        if (!isClickingDropdown.current[item.id]) {
+                                          setShowPartsDropdown(prev => ({ ...prev, [item.id]: false }));
+                                        }
+                                      }, 200);
+                                    }}
+                                    className="w-full"
+                                  />
+                                  {showPartsDropdown[item.id] && typeof window !== "undefined" && dropdownPosition[item.id] && createPortal(
+                                    <div 
+                                      ref={(el) => {
+                                        if (el) dropdownRefs.current[item.id] = el;
+                                      }}
+                                      className="fixed z-[9999] bg-card border border-border rounded-md shadow-lg max-h-60 overflow-auto"
+                                      data-dropdown-item
+                                      style={{
+                                        top: `${dropdownPosition[item.id].top}px`,
+                                        left: `${dropdownPosition[item.id].left}px`,
+                                        width: `${dropdownPosition[item.id].width}px`,
+                                      }}
+                                      onMouseDown={(e) => {
+                                        // Mark that we're clicking on dropdown
+                                        isClickingDropdown.current[item.id] = true;
+                                        // Prevent blur when clicking inside dropdown
+                                        e.preventDefault();
+                                      }}
+                                    >
+                                      {partsLoading ? (
+                                        <div className="px-3 py-2 text-sm text-muted-foreground">Loading parts...</div>
+                                      ) : (
+                                        <>
+                                          {(() => {
+                                            const searchValue = partsSearchTerm[item.id] || "";
+                                            const filteredParts = searchValue
+                                              ? parts.filter(p => 
+                                                  p.partNo.toLowerCase().includes(searchValue.toLowerCase()) ||
+                                                  p.description.toLowerCase().includes(searchValue.toLowerCase())
+                                                ).slice(0, 50) // Limit to 50 for performance
+                                              : parts.slice(0, 50); // Show only first 50 for performance
+                                            
+                                            return filteredParts.length > 0 ? (
+                                              filteredParts.map((p) => (
+                                                <div
+                                                  key={p.id}
+                                                  data-dropdown-item
+                                                  className="px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer border-b border-border last:border-b-0 transition-colors"
+                                                  onMouseDown={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    // Mark that we're clicking on dropdown
+                                                    isClickingDropdown.current[item.id] = true;
+                                                    
+                                                    // Clear search term first to ensure input shows selected part
+                                                    setPartsSearchTerm(prev => {
+                                                      const updated = { ...prev };
+                                                      delete updated[item.id];
+                                                      return updated;
+                                                    });
+                                                    
+                                                    // Then update the selection
+                                                    handleUpdateInlineItem(item.id, "selectedPartId", p.id);
+                                                    
+                                                    setShowPartsDropdown(prev => ({ ...prev, [item.id]: false }));
+                                                    // Reset flag after a short delay
+                                                    setTimeout(() => {
+                                                      isClickingDropdown.current[item.id] = false;
+                                                    }, 100);
+                                                  }}
+                                                >
+                                                  <div className="font-medium">{p.partNo}</div>
+                                                  {p.description && (
+                                                    <div className="text-xs text-muted-foreground truncate mt-0.5">{p.description}</div>
+                                                  )}
+                                                </div>
+                                              ))
+                                            ) : (
+                                              <div className="px-3 py-2 text-sm text-muted-foreground">
+                                                {searchValue ? "No parts found" : "Type to search parts..."}
+                                              </div>
+                                            );
+                                          })()}
+                                        </>
+                                      )}
+                                    </div>,
+                                    document.body
+                                  )}
+                                </div>
                                 {!item.selectedPartId && (
                                   <p className="text-destructive text-xs">Required</p>
                                 )}
@@ -854,28 +1211,6 @@ export const SalesInvoice = () => {
                                 >
                                   <X className="w-4 h-4" />
                                 </Button>
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  className="text-xs"
-                                  onClick={() => {
-                                    setCurrentItemForAlternate(item);
-                                    setShowAlternateParts(true);
-                                  }}
-                                >
-                                  Alternate Parts
-                                </Button>
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  className="text-xs"
-                                  onClick={() => {
-                                    setCurrentItemForAlternate(item);
-                                    setShowAlternateBrands(true);
-                                  }}
-                                >
-                                  Alternate Brands
-                                </Button>
                               </div>
                             </TableCell>
                           </TableRow>
@@ -900,21 +1235,51 @@ export const SalesInvoice = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Received Cash</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={receivedCash}
-                    onChange={(e) => setReceivedCash(parseFloat(e.target.value) || 0)}
-                  />
+                  <Label>Account</Label>
+                  <Select 
+                    value={selectedAccount} 
+                    onValueChange={(value) => {
+                      console.log("Account selected:", value);
+                      setSelectedAccount(value);
+                    }} 
+                    disabled={loadingAccounts || accounts.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={
+                        loadingAccounts 
+                          ? "Loading accounts..." 
+                          : accounts.length === 0 
+                            ? "No accounts available. Add accounts in Accounting → Accounts." 
+                            : "Select account..."
+                      } />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {loadingAccounts ? (
+                        <SelectItem value="loading" disabled>
+                          Loading accounts...
+                        </SelectItem>
+                      ) : accounts.length === 0 ? (
+                        <SelectItem value="no-accounts" disabled>
+                          No accounts available. Please add accounts in Accounting → Accounts.
+                        </SelectItem>
+                      ) : (
+                        accounts.map((account) => (
+                          <SelectItem key={account.id} value={account.id}>
+                            {account.code ? `${account.code} - ${account.name}` : account.name} {account.type && account.type !== "General" ? `(${account.type})` : ""}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Received Bank</Label>
+                  <Label>Received Amount</Label>
                   <Input
                     type="number"
                     min={0}
-                    value={receivedBank}
-                    onChange={(e) => setReceivedBank(parseFloat(e.target.value) || 0)}
+                    value={receivedAmount}
+                    onChange={(e) => setReceivedAmount(parseFloat(e.target.value) || 0)}
+                    placeholder="0"
                   />
                 </div>
               </div>
@@ -944,7 +1309,7 @@ export const SalesInvoice = () => {
                 </div>
                 <div className="flex justify-between text-green-600">
                   <span>Received:</span>
-                  <span>Rs {(receivedCash + receivedBank).toLocaleString()}</span>
+                  <span>Rs {receivedAmount.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between border-t pt-2">
                   <span className="font-medium">Due Amount:</span>
@@ -1104,80 +1469,6 @@ export const SalesInvoice = () => {
         </Card>
       )}
 
-      {/* Alternate Parts Dialog */}
-      <Dialog open={showAlternateParts} onOpenChange={setShowAlternateParts}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              Alternate Parts
-              <Button variant="secondary" size="sm" onClick={() => setShowAlternateParts(false)}>
-                Close
-              </Button>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="border rounded-lg overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead className="text-right">Quantity</TableHead>
-                  <TableHead className="text-right">Sale Price</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {mockAlternateParts.map((alt) => (
-                  <TableRow
-                    key={alt.id}
-                    className="cursor-pointer hover:bg-muted/50"
-                    onClick={() => {
-                      toast({ title: "Alternate Selected", description: `Selected: ${alt.name}` });
-                      setShowAlternateParts(false);
-                    }}
-                  >
-                    <TableCell>{alt.id}</TableCell>
-                    <TableCell>{alt.name}</TableCell>
-                    <TableCell className="text-right">{alt.quantity}</TableCell>
-                    <TableCell className="text-right">{alt.salePrice.toLocaleString()}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Alternate Brands Dialog */}
-      <Dialog open={showAlternateBrands} onOpenChange={setShowAlternateBrands}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              Alternate Brands
-              <Button variant="secondary" size="sm" onClick={() => setShowAlternateBrands(false)}>
-                Close
-              </Button>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-2">
-            {currentItemForAlternate && getPartForItem(currentItemForAlternate.selectedPartId)?.brands.map((brand) => (
-              <Button
-                key={brand.id}
-                variant="outline"
-                className="w-full justify-start"
-                onClick={() => {
-                  toast({ title: "Brand Selected", description: `Selected: ${brand.name}` });
-                  setShowAlternateBrands(false);
-                }}
-              >
-                {brand.name}
-              </Button>
-            ))}
-            {(!currentItemForAlternate || !getPartForItem(currentItemForAlternate.selectedPartId)) && (
-              <p className="text-muted-foreground text-center py-4">No brands available</p>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* View Invoice Dialog */}
       <Dialog open={showViewInvoice} onOpenChange={setShowViewInvoice}>

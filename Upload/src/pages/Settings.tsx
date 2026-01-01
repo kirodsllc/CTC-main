@@ -8,6 +8,8 @@ import { ActivityLogsTab } from "@/components/settings/ActivityLogsTab";
 import { BackupRestoreTab } from "@/components/settings/BackupRestoreTab";
 import { CompanyProfileTab } from "@/components/settings/CompanyProfileTab";
 import { WhatsAppSettingsTab } from "@/components/settings/WhatsAppSettingsTab";
+import { LongCatSettingsTab } from "@/components/settings/LongCatSettingsTab";
+import { PaymentAccountsTab } from "@/components/settings/PaymentAccountsTab";
 import { 
   Users, 
   Shield, 
@@ -16,11 +18,13 @@ import {
   Database, 
   Building2, 
   MessageCircle,
+  Bot,
+  Wallet,
   Settings as SettingsIcon
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type SettingsTab = "users" | "roles" | "approvals" | "logs" | "backup" | "company" | "whatsapp";
+type SettingsTab = "users" | "roles" | "approvals" | "logs" | "backup" | "company" | "whatsapp" | "longcat" | "accounts";
 
 const Settings = () => {
   const [activeTab, setActiveTab] = useState<SettingsTab>("users");
@@ -33,6 +37,8 @@ const Settings = () => {
     { id: "backup" as const, label: "Backup & Restore", icon: Database },
     { id: "company" as const, label: "Company Profile", icon: Building2 },
     { id: "whatsapp" as const, label: "WhatsApp", icon: MessageCircle },
+    { id: "longcat" as const, label: "LongCat AI", icon: Bot },
+    { id: "accounts" as const, label: "Payment Accounts", icon: Wallet },
   ];
 
   return (
@@ -85,6 +91,8 @@ const Settings = () => {
           {activeTab === "backup" && <BackupRestoreTab />}
           {activeTab === "company" && <CompanyProfileTab />}
           {activeTab === "whatsapp" && <WhatsAppSettingsTab />}
+          {activeTab === "longcat" && <LongCatSettingsTab />}
+          {activeTab === "accounts" && <PaymentAccountsTab />}
         </main>
       </div>
     </div>

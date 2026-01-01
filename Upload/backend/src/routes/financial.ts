@@ -444,23 +444,28 @@ router.get('/ledgers', async (req: Request, res: Response) => {
     const accountWhere: any = {};
     if (main_group) {
       accountWhere.subgroup = {
-        mainGroup: { code: main_group as string },
+        mainGroup: { id: main_group as string },
       };
     }
     if (sub_group) {
       accountWhere.subgroup = {
         ...accountWhere.subgroup,
-        code: sub_group as string,
+        id: sub_group as string,
       };
     }
     if (account) {
-      accountWhere.code = account as string;
+      accountWhere.id = account as string;
     }
     
-    // Get accounts
+    // Get accounts with proper includes
     const accounts = await prisma.account.findMany({
       where: accountWhere,
       include: {
+        subgroup: {
+          include: {
+            mainGroup: true,
+          },
+        },
         journalLines: {
           where: {
             journalEntry: {
@@ -472,36 +477,45 @@ router.get('/ledgers', async (req: Request, res: Response) => {
           include: {
             journalEntry: true,
           },
-          orderBy: {
-            journalEntry: { entryDate: 'asc' },
-          },
+          orderBy: [
+            { journalEntry: { entryDate: 'asc' } },
+            { journalEntry: { entryNo: 'asc' } },
+            { lineOrder: 'asc' },
+          ],
         },
+      },
+      orderBy: {
+        code: 'asc',
       },
     });
     
+    // Helper function to calculate balance change based on account type
+    const calculateBalanceChange = (debit: number, credit: number, accountType: string) => {
+      // Assets, Expenses, Cost: Normal balance is DEBIT (increase with debit, decrease with credit)
+      // Liabilities, Equity, Revenue: Normal balance is CREDIT (increase with credit, decrease with debit)
+      if (['asset', 'expense', 'cost'].includes(accountType.toLowerCase())) {
+        return debit - credit;
+      } else {
+        return credit - debit;
+      }
+    };
+    
     // Transform to ledger entries format
     const ledgerEntries: any[] = [];
+    let tIdCounter = 1;
     
     accounts.forEach(acc => {
-      // Add opening balance entry
-      ledgerEntries.push({
-        id: `opening-${acc.id}`,
-        tId: null,
-        voucherNo: '-',
-        timeStamp: '-',
-        description: 'Opening Balance',
-        debit: acc.openingBalance > 0 ? acc.openingBalance : null,
-        credit: acc.openingBalance < 0 ? Math.abs(acc.openingBalance) : null,
-        balance: acc.openingBalance,
-      });
-      
-      // Add journal line entries
+      const accountType = acc.subgroup?.mainGroup?.type || 'asset';
       let runningBalance = acc.openingBalance;
-      acc.journalLines.forEach((line, index) => {
-        runningBalance += (line.debit || 0) - (line.credit || 0);
+      
+      // Add journal line entries with proper balance calculation
+      acc.journalLines.forEach((line) => {
+        const balanceChange = calculateBalanceChange(line.debit, line.credit, accountType);
+        runningBalance += balanceChange;
+        
         ledgerEntries.push({
           id: `line-${line.id}`,
-          tId: line.journalEntryId,
+          tId: tIdCounter++,
           voucherNo: line.journalEntry.entryNo,
           timeStamp: line.journalEntry.entryDate.toISOString().replace('T', ' ').substring(0, 19),
           description: line.description || line.journalEntry.description || '',
@@ -528,9 +542,9 @@ router.get('/ledgers', async (req: Request, res: Response) => {
         totalPages: Math.ceil(ledgerEntries.length / limitNum)
       }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching ledgers:', error);
-    res.status(500).json({ error: 'Failed to fetch ledger entries' });
+    res.status(500).json({ error: error.message || 'Failed to fetch ledger entries' });
   }
 });
 

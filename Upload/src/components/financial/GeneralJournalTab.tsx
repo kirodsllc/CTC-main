@@ -76,7 +76,7 @@ export const GeneralJournalTab = () => {
 
   useEffect(() => {
     fetchEntries();
-  }, [page, limit]);
+  }, [page, limit, fromDate, toDate]);
 
   const handleSearch = () => {
     setPage(1);

@@ -25,7 +25,16 @@ export const ReceiptVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
   const { toast } = useToast();
   const [receivedFrom, setReceivedFrom] = useState("");
   const [voucherNo, setVoucherNo] = useState(generateVoucherNo());
-  const [date, setDate] = useState(new Date().toLocaleDateString("en-GB").replace(/\//g, "/"));
+  // Initialize date in YYYY-MM-DD format for date input
+  const getTodayDate = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  
+  const [date, setDate] = useState(getTodayDate());
   const [drAccount, setDrAccount] = useState("");
   const [entries, setEntries] = useState<VoucherEntry[]>([
     { id: "1", accountCr: "", description: "", crAmount: 0 }
@@ -43,6 +52,14 @@ export const ReceiptVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
 
   const updateEntry = (id: string, field: keyof VoucherEntry, value: string | number) => {
     setEntries(entries.map(e => e.id === id ? { ...e, [field]: value } : e));
+  };
+
+  // Format amount helper
+  const formatAmount = (amount: number): string => {
+    return amount.toLocaleString("en-PK", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
   };
 
   const totalAmount = entries.reduce((sum, e) => sum + (Number(e.crAmount) || 0), 0);
@@ -128,6 +145,7 @@ export const ReceiptVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
           <div className="relative">
             <Label className="absolute -top-2 left-2 bg-background px-1 text-xs text-muted-foreground z-10">Date</Label>
             <Input
+              type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
               className="h-11 bg-muted/30"
@@ -187,7 +205,12 @@ export const ReceiptVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
                 type="number"
                 placeholder="amount"
                 value={entry.crAmount || ""}
-                onChange={(e) => updateEntry(entry.id, "crAmount", parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  const value = parseFloat(e.target.value) || 0;
+                  updateEntry(entry.id, "crAmount", value);
+                }}
+                step="0.01"
+                min="0"
                 className="h-10"
               />
             </div>
@@ -221,7 +244,7 @@ export const ReceiptVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
         <div className="relative w-48">
           <Label className="absolute -top-2 left-2 bg-background px-1 text-xs text-muted-foreground z-10">Total Amount</Label>
           <Input
-            value={totalAmount}
+            value={formatAmount(totalAmount)}
             readOnly
             className="h-11 bg-muted/30 font-medium"
           />

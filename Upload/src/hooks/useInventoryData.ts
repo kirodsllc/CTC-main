@@ -1,4 +1,5 @@
 import { useState, useEffect, createContext, useContext } from 'react';
+import { apiClient } from '@/lib/api';
 
 export interface Part {
   id: string;
@@ -104,45 +105,90 @@ export const useInventoryStats = () => {
     suppliersCount: 0,
     categoriesCount: 0,
   });
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const parts = loadFromStorage<Part[]>(STORAGE_KEYS.parts, initialParts);
-    const kits = loadFromStorage<Kit[]>(STORAGE_KEYS.kits, initialKits);
-    const suppliers = loadFromStorage<Supplier[]>(STORAGE_KEYS.suppliers, initialSuppliers);
-    const categories = loadFromStorage<Category[]>(STORAGE_KEYS.categories, initialCategories);
+  const fetchStats = async () => {
+    setLoading(true);
+    try {
+      // Fetch all counts in parallel - use limit: 1 to get pagination info efficiently
+      const [partsResponse, categoriesResponse, kitsResponse, suppliersResponse] = await Promise.all([
+        apiClient.getParts({ limit: 1, page: 1 }).catch(() => ({ data: [], pagination: { total: 0 } })),
+        apiClient.getAllCategories().catch(() => ({ data: [] })),
+        apiClient.getKits({ limit: 1, page: 1 }).catch(() => ({ data: [], pagination: { total: 0 } })),
+        apiClient.getSuppliers({ limit: 1, page: 1 }).catch(() => ({ data: [], pagination: { total: 0 } })),
+      ]);
 
-    setStats({
-      partsCount: parts.length,
-      kitsCount: kits.length,
-      suppliersCount: suppliers.filter(s => s.status === 'active').length,
-      categoriesCount: categories.length,
-    });
+      // Extract counts from responses - prefer pagination.total for accurate counts
+      let partsCount = 0;
+      if (partsResponse.pagination && typeof partsResponse.pagination.total === 'number') {
+        partsCount = partsResponse.pagination.total;
+      } else if (Array.isArray(partsResponse.data)) {
+        partsCount = partsResponse.data.length;
+      } else if (Array.isArray(partsResponse)) {
+        partsCount = partsResponse.length;
+      }
 
-    // Listen for storage changes
-    const handleStorageChange = () => {
-      const updatedParts = loadFromStorage<Part[]>(STORAGE_KEYS.parts, initialParts);
-      const updatedKits = loadFromStorage<Kit[]>(STORAGE_KEYS.kits, initialKits);
-      const updatedSuppliers = loadFromStorage<Supplier[]>(STORAGE_KEYS.suppliers, initialSuppliers);
-      const updatedCategories = loadFromStorage<Category[]>(STORAGE_KEYS.categories, initialCategories);
+      let categoriesCount = 0;
+      if (Array.isArray(categoriesResponse.data)) {
+        categoriesCount = categoriesResponse.data.length;
+      } else if (Array.isArray(categoriesResponse)) {
+        categoriesCount = categoriesResponse.length;
+      }
+
+      let kitsCount = 0;
+      if (kitsResponse.pagination && typeof kitsResponse.pagination.total === 'number') {
+        kitsCount = kitsResponse.pagination.total;
+      } else if (Array.isArray(kitsResponse.data)) {
+        kitsCount = kitsResponse.data.length;
+      } else if (Array.isArray(kitsResponse)) {
+        kitsCount = kitsResponse.length;
+      }
+
+      let suppliersCount = 0;
+      // For suppliers, fetch active ones separately to get accurate count
+      const activeSuppliersResponse = await apiClient.getSuppliers({ limit: 1, page: 1, status: 'active' }).catch(() => ({ data: [], pagination: { total: 0 } }));
+      if (activeSuppliersResponse.pagination && typeof activeSuppliersResponse.pagination.total === 'number') {
+        suppliersCount = activeSuppliersResponse.pagination.total;
+      } else if (Array.isArray(activeSuppliersResponse.data)) {
+        suppliersCount = activeSuppliersResponse.data.length;
+      } else if (Array.isArray(activeSuppliersResponse)) {
+        suppliersCount = activeSuppliersResponse.length;
+      }
 
       setStats({
-        partsCount: updatedParts.length,
-        kitsCount: updatedKits.length,
-        suppliersCount: updatedSuppliers.filter(s => s.status === 'active').length,
-        categoriesCount: updatedCategories.length,
+        partsCount,
+        kitsCount,
+        suppliersCount,
+        categoriesCount,
       });
+    } catch (error: any) {
+      console.error('Error fetching inventory stats:', error);
+      // Keep existing stats on error
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchStats();
+
+    // Refresh stats every 30 seconds
+    const interval = setInterval(fetchStats, 30000);
+
+    // Listen for custom events to refresh stats
+    const handleInventoryUpdate = () => {
+      fetchStats();
     };
 
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('inventory-updated', handleStorageChange);
+    window.addEventListener('inventory-updated', handleInventoryUpdate);
 
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('inventory-updated', handleStorageChange);
+      clearInterval(interval);
+      window.removeEventListener('inventory-updated', handleInventoryUpdate);
     };
   }, []);
 
-  return stats;
+  return { ...stats, loading, refresh: fetchStats };
 };
 
 export { InventoryDataContext, loadFromStorage, saveToStorage, STORAGE_KEYS, initialParts, initialKits, initialSuppliers, initialCategories };

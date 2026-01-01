@@ -178,6 +178,7 @@ router.get('/', async (req: Request, res: Response) => {
           category: true,
           subcategory: true,
           application: true,
+          models: true,
         },
         orderBy: {
           createdAt: 'desc',
@@ -197,6 +198,8 @@ router.get('/', async (req: Request, res: Response) => {
       category_name: part.category?.name || null,
       subcategory_name: part.subcategory?.name || null,
       application_name: part.application?.name || null,
+      application: part.application ? { id: part.application.id, name: part.application.name } : null,
+      application_id: part.applicationId || null,
       description: part.description,
       hs_code: part.hsCode,
       weight: part.weight,
@@ -211,6 +214,10 @@ router.get('/', async (req: Request, res: Response) => {
       image_p1: part.imageP1,
       image_p2: part.imageP2,
       status: part.status,
+      models: part.models?.map((m: any) => ({
+        model: m.name,
+        qty: m.qtyUsed || 1,
+      })) || [],
       created_at: part.createdAt,
       updated_at: part.updatedAt,
     }));
@@ -546,6 +553,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       subcategory_id: part.subcategoryId || null,
       application_name: part.application?.name || null,
       application_id: part.applicationId || null,
+      application: part.application ? { id: part.application.id, name: part.application.name } : null,
       description: part.description,
       hs_code: part.hsCode,
       weight: part.weight,
@@ -601,6 +609,12 @@ router.post('/', async (req: Request, res: Response) => {
       status,
       models,
     } = req.body;
+
+    // Validate required fields
+    const partNoStr = part_no ? String(part_no).trim() : '';
+    if (!partNoStr || partNoStr === '') {
+      return res.status(400).json({ error: 'Part number is required' });
+    }
 
     // Handle master part
     let masterPartId = null;
@@ -839,31 +853,39 @@ router.post('/', async (req: Request, res: Response) => {
     const part = await prisma.part.create({
       data: {
         masterPartId,
-        partNo: part_no,
+        partNo: partNoStr,
         brandId,
-        description: description || null,
+        description: description ? String(description).trim() : null,
         categoryId: validatedCategoryId || null,
         subcategoryId: validatedSubcategoryId || null,
         applicationId: validatedApplicationId || null,
-        hsCode: hs_code || null,
-        weight: weight ? parseFloat(weight) : null,
-        reorderLevel: reorder_level ? parseInt(reorder_level) : 0,
-        uom: uom || 'pcs',
-        cost: cost ? parseFloat(cost) : null,
-        priceA: price_a ? parseFloat(price_a) : null,
-        priceB: price_b ? parseFloat(price_b) : null,
-        priceM: price_m ? parseFloat(price_m) : null,
-        smc: smc || null,
-        size: size || null,
-        imageP1: image_p1 || null,
-        imageP2: image_p2 || null,
-        status: status || 'active',
-        models: models && Array.isArray(models)
+        hsCode: hs_code ? String(hs_code).trim() : null,
+        weight: weight ? parseFloat(String(weight)) : null,
+        reorderLevel: reorder_level ? parseInt(String(reorder_level)) : 0,
+        uom: uom ? String(uom).trim() : 'pcs',
+        cost: cost !== null && cost !== undefined ? parseFloat(String(cost)) : null,
+        priceA: price_a !== null && price_a !== undefined ? parseFloat(String(price_a)) : null,
+        priceB: price_b !== null && price_b !== undefined ? parseFloat(String(price_b)) : null,
+        priceM: price_m !== null && price_m !== undefined ? parseFloat(String(price_m)) : null,
+        smc: smc ? String(smc).trim() : null,
+        size: size ? String(size).trim() : null,
+        imageP1: image_p1 ? String(image_p1).trim() : null,
+        imageP2: image_p2 ? String(image_p2).trim() : null,
+        status: (() => {
+          if (!status) return 'active';
+          const statusStr = String(status).trim();
+          if (statusStr === 'A' || statusStr === 'a') return 'active';
+          if (statusStr === 'N' || statusStr === 'n') return 'inactive';
+          return statusStr === 'active' || statusStr === 'inactive' ? statusStr : 'active';
+        })(),
+        models: models && Array.isArray(models) && models.length > 0
           ? {
-              create: models.map((m: any) => ({
-                name: m.name,
-                qtyUsed: m.qty_used || m.qtyUsed || 1,
-              })),
+              create: models
+                .filter((m: any) => m && m.name && String(m.name).trim() !== '')
+                .map((m: any) => ({
+                  name: String(m.name).trim(),
+                  qtyUsed: m.qty_used || m.qtyUsed || 1,
+                })),
             }
           : undefined,
       },
@@ -885,6 +907,8 @@ router.post('/', async (req: Request, res: Response) => {
       category_name: part.category?.name || null,
       subcategory_name: part.subcategory?.name || null,
       application_name: part.application?.name || null,
+      application: part.application ? { id: part.application.id, name: part.application.name } : null,
+      application_id: part.applicationId || null,
       description: part.description,
       hs_code: part.hsCode,
       weight: part.weight,
@@ -909,7 +933,35 @@ router.post('/', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Error creating part:', error);
-    res.status(500).json({ error: error.message });
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      meta: error.meta,
+      stack: error.stack,
+    });
+    
+    // Handle specific Prisma errors
+    if (error.code === 'P2002') {
+      // Unique constraint violation
+      const field = error.meta?.target?.[0] || 'field';
+      return res.status(400).json({ 
+        error: `A part with this ${field} already exists`,
+        details: error.meta 
+      });
+    }
+    
+    if (error.code === 'P2003') {
+      // Foreign key constraint violation
+      return res.status(400).json({ 
+        error: 'Invalid reference to related record',
+        details: error.meta 
+      });
+    }
+    
+    res.status(500).json({ 
+      error: error.message || 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
@@ -1342,6 +1394,7 @@ router.put('/:id', async (req: Request, res: Response) => {
       // Step 7: Application
       application_name: part.application?.name || null,
       application_id: part.applicationId || null,
+      application: part.application ? { id: part.application.id, name: part.application.name } : null,
       // Step 8: Other fields
       hs_code: part.hsCode || null,
       weight: part.weight || null,

@@ -23,7 +23,16 @@ interface PaymentVoucherFormProps {
 export const PaymentVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSave }: PaymentVoucherFormProps) => {
   const { toast } = useToast();
   const [paidTo, setPaidTo] = useState("");
-  const [date, setDate] = useState(new Date().toLocaleDateString("en-GB").replace(/\//g, "/"));
+  // Initialize date in YYYY-MM-DD format for date input
+  const getTodayDate = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  
+  const [date, setDate] = useState(getTodayDate());
   const [crAccount, setCrAccount] = useState("");
   const [entries, setEntries] = useState<VoucherEntry[]>([
     { id: "1", accountDr: "", description: "", drAmount: 0 }
@@ -41,6 +50,14 @@ export const PaymentVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
 
   const updateEntry = (id: string, field: keyof VoucherEntry, value: string | number) => {
     setEntries(entries.map(e => e.id === id ? { ...e, [field]: value } : e));
+  };
+
+  // Format amount helper
+  const formatAmount = (amount: number): string => {
+    return amount.toLocaleString("en-PK", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
   };
 
   const totalAmount = entries.reduce((sum, e) => sum + (Number(e.drAmount) || 0), 0);
@@ -116,6 +133,7 @@ export const PaymentVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
           <div className="relative">
             <Label className="absolute -top-2 left-2 bg-background px-1 text-xs text-muted-foreground z-10">Date</Label>
             <Input
+              type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
               className="h-11 bg-muted/30"
@@ -173,7 +191,12 @@ export const PaymentVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
                 type="number"
                 placeholder="amount"
                 value={entry.drAmount || ""}
-                onChange={(e) => updateEntry(entry.id, "drAmount", parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  const value = parseFloat(e.target.value) || 0;
+                  updateEntry(entry.id, "drAmount", value);
+                }}
+                step="0.01"
+                min="0"
                 className="h-10"
               />
             </div>
@@ -207,7 +230,7 @@ export const PaymentVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
         <div className="relative w-48">
           <Label className="absolute -top-2 left-2 bg-background px-1 text-xs text-muted-foreground z-10">Total Amount</Label>
           <Input
-            value={totalAmount}
+            value={formatAmount(totalAmount)}
             readOnly
             className="h-11 bg-muted/30 font-medium"
           />

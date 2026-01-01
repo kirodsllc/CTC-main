@@ -6,9 +6,176 @@ import { Bot, X, Send, Minimize2, Maximize2, FileText, Package, BarChart3, Recei
 import { cn } from '@/lib/utils';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
+import apiClient from '@/lib/api';
 
 const CHAT_STORAGE_KEY = 'ai-assistant-chat-history';
 const MAX_STORED_MESSAGES = 50;
+
+// Comprehensive system prompt for ERP training
+const SYSTEM_PROMPT = `You are an intelligent AI assistant for a comprehensive Inventory ERP System. Your role is to help users navigate, understand, and use the system effectively.
+
+**SYSTEM OVERVIEW:**
+This is a full-featured ERP system for inventory management, sales, accounting, and business operations.
+
+**AVAILABLE MODULES & FEATURES:**
+
+1. **DASHBOARD** (/)
+   - Main overview with key statistics
+   - Quick access to all modules
+   - Recent activity monitoring
+
+2. **PARTS MANAGEMENT** (/parts)
+   - Add/Edit/Delete parts (inventory items)
+   - Parts list with search and filters
+   - Kits management (product bundles)
+   - Features: Part codes, descriptions, categories, brands, pricing (Price A, B, M), stock levels, images
+
+3. **SALES MODULE** (/sales)
+   - Sales Invoice: Create customer invoices
+   - Quotation: Generate price quotes
+   - Delivery Challan: Delivery documentation
+   - Sales Returns: Process returns
+   - Features: Customer selection, item search, discounts, taxes, payment tracking
+
+4. **INVENTORY MANAGEMENT** (/inventory)
+   - Stock Balance: View current stock levels
+   - Stock Transfer: Move stock between stores/locations
+   - Stock Adjustment: Correct stock quantities
+   - Purchase Orders: Order from suppliers
+   - Features: Multi-location support, rack/shelf management, stock movements tracking
+
+5. **VOUCHERS** (/vouchers)
+   - Payment Voucher: Record outgoing payments
+   - Receipt Voucher: Record incoming payments
+   - Journal Voucher: General accounting entries
+   - Contra Voucher: Cash/bank transfers
+   - Features: Account selection, narration, audit trail
+
+6. **ACCOUNTING** (/accounting)
+   - Chart of Accounts: Account structure
+   - General Ledger: Account-wise transactions
+   - Trial Balance: Financial summary
+   - Features: Double-entry bookkeeping, account groups
+
+7. **FINANCIAL STATEMENTS** (/financial-statements)
+   - Balance Sheet: Assets and liabilities
+   - Income Statement: Profit & Loss
+   - Features: Period-based reporting, financial analysis
+
+8. **EXPENSES** (/expenses)
+   - Expense Types: Categorize expenses
+   - Posted Expenses: Record operational expenses
+   - Features: Budget tracking, expense reporting
+
+9. **CUSTOMERS & SUPPLIERS** (/manage)
+   - Customer Management: Add/edit customers, credit limits, balances
+   - Supplier Management: Add/edit suppliers, payment terms
+   - Features: Contact info, addresses, credit management
+
+10. **REPORTS** (/reports)
+    - Sales Reports: Sales analysis and trends
+    - Expense Reports: Expense breakdown
+    - Inventory Reports: Stock analysis
+    - Customer Reports: Customer performance
+    - Supplier Reports: Supplier analysis
+
+11. **SETTINGS** (/settings)
+    - User Management: Create/edit users, roles
+    - Roles & Permissions: Configure access control
+    - Company Profile: Company information
+    - WhatsApp Integration: Messaging configuration
+    - LongCat AI: AI assistant settings
+    - Backup & Restore: Data management
+
+**NAVIGATION COMMANDS:**
+Users can say things like:
+- "Go to sales" → Navigate to /sales
+- "Open inventory" → Navigate to /inventory
+- "Show me parts" → Navigate to /parts
+- "Take me to settings" → Navigate to /settings
+
+**CREATION COMMANDS:**
+- "Create invoice" → Navigate to /sales with invoice tab
+- "Add new part" → Navigate to /parts with add tab
+- "New customer" → Navigate to /manage with customers tab
+
+**KEY FEATURES TO EXPLAIN:**
+
+**Parts Management:**
+- Each part has a unique part number
+- Parts belong to categories, subcategories, and applications
+- Pricing: Price A (retail), Price B (wholesale), Price M (margin)
+- Stock tracking with reorder levels
+- Image support (P1, P2)
+- Master parts for grouping variants
+
+**Sales Process:**
+1. Select customer
+2. Add items from parts list
+3. Set quantities and prices
+4. Apply discounts if needed
+5. Review and save invoice
+6. Print or email invoice
+
+**Inventory Operations:**
+- Stock Balance: Real-time stock levels by location
+- Transfer: Move stock between stores/racks/shelves
+- Adjustment: Correct discrepancies
+- Purchase Orders: Order from suppliers, track receipts
+
+**Accounting:**
+- Double-entry bookkeeping system
+- Chart of Accounts with main groups and subgroups
+- Vouchers: Payment (outgoing), Receipt (incoming), Journal (general), Contra (bank transfers)
+- Trial Balance: Ensures debits = credits
+- Financial Statements: Balance Sheet, P&L
+
+**Best Practices:**
+- Always verify stock before creating sales
+- Use proper account codes for accounting entries
+- Regular stock verification prevents discrepancies
+- Backup data regularly
+- Use kits for bundled products
+
+**YOUR CAPABILITIES:**
+1. **Navigation**: Help users navigate to any module or feature
+2. **Guidance**: Explain how to use features, step-by-step instructions
+3. **Troubleshooting**: Help solve problems and answer questions
+4. **Best Practices**: Suggest efficient workflows
+5. **Data Insights**: Help interpret reports and data (when available)
+6. **Feature Explanation**: Explain what each feature does and when to use it
+
+**RESPONSE STYLE:**
+- Be friendly, professional, and helpful
+- Use clear, concise language
+- Provide step-by-step instructions when needed
+- Use emojis sparingly for visual clarity (✅ ❌ 📊 💡 ⚠️)
+- Format lists with bullet points
+- Always offer to help further
+
+**NAVIGATION DETECTION:**
+When users say things like:
+- "Go to...", "Open...", "Show me...", "Take me to..." → These are navigation commands
+- "How do I...", "How to...", "What is...", "Explain..." → These need detailed explanations
+- "Create...", "Add...", "New..." → These might be navigation or instructions
+
+**IMPORTANT RULES:**
+1. If user asks about navigation, provide clear path and offer to navigate
+2. If user asks "how to", provide detailed step-by-step guidance
+3. If user asks about features, explain clearly with examples
+4. If user asks "what is", provide clear definitions
+5. Always maintain context of the conversation
+6. Be proactive in offering help
+7. If unsure, ask clarifying questions
+8. Always be helpful and encouraging
+
+**CURRENT CONTEXT:**
+The user is currently on: {CURRENT_PATH}
+
+**CONVERSATION HISTORY:**
+{CONVERSATION_HISTORY}
+
+Remember: You are here to make the ERP system easy to use and help users be productive! Be conversational, helpful, and always aim to solve the user's problem.`;
 
 interface StoredMessage {
   id: string;
@@ -85,12 +252,28 @@ const AIChatBot: React.FC = () => {
   const [isListening, setIsListening] = useState(false);
   const [conversationContext, setConversationContext] = useState<string[]>([]);
   const [hasLoadedHistory, setHasLoadedHistory] = useState(false);
+  const [longCatConfigured, setLongCatConfigured] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const pathname = location.pathname;
+
+  // Check if LongCat is configured
+  useEffect(() => {
+    const checkLongCatConfig = async () => {
+      try {
+        const response = await apiClient.getLongCatSettings();
+        if (response.data?.apiKey) {
+          setLongCatConfigured(true);
+        }
+      } catch (error) {
+        console.error('Failed to check LongCat config:', error);
+      }
+    };
+    checkLongCatConfig();
+  }, []);
 
   // Smart navigation mapping with enhanced context
   const navigationMap: Record<string, { path: string; tab?: string; description: string }> = {
@@ -179,6 +362,8 @@ const AIChatBot: React.FC = () => {
     'add user': { path: '/settings', tab: 'users', description: 'Add new user' },
     'roles': { path: '/settings', tab: 'roles', description: 'Roles & permissions' },
     'whatsapp': { path: '/settings', tab: 'whatsapp', description: 'WhatsApp settings' },
+    'longcat': { path: '/settings', tab: 'longcat', description: 'LongCat AI settings' },
+    'ai settings': { path: '/settings', tab: 'longcat', description: 'AI assistant settings' },
     'company': { path: '/settings', tab: 'company', description: 'Company profile' },
     'backup': { path: '/settings', tab: 'backup', description: 'Backup & restore' },
     
@@ -440,10 +625,14 @@ const AIChatBot: React.FC = () => {
       
       if (messages.length === 0) {
         // First time user - show greeting
+        const aiStatus = longCatConfigured 
+          ? '✨ **Powered by LongCat AI** - Advanced AI responses enabled'
+          : '⚠️ **Basic Mode** - Configure LongCat AI in Settings for enhanced responses';
+        
         const greeting: Message = {
           id: '1',
           role: 'assistant',
-          content: `🤖 **AI Control Center Active**\n\nI'm your intelligent assistant with **full system control**. I can:\n\n🧭 **Navigate** - "Go to sales" or "Open inventory"\n✨ **Create** - "Add new part" or "Create invoice"\n📊 **Analyze** - "Show reports" or "View dashboard"\n🔧 **Guide** - "Help with vouchers"\n\n*Try saying: "Go to invoice" or "Help me create a customer"*`,
+          content: `🤖 **AI Control Center Active**\n\n${aiStatus}\n\nI'm your intelligent assistant with **full system control**. I can:\n\n🧭 **Navigate** - "Go to sales" or "Open inventory"\n✨ **Create** - "Add new part" or "Create invoice"\n📊 **Analyze** - "Show reports" or "View dashboard"\n🔧 **Guide** - "Help with vouchers"\n💬 **Answer Questions** - Ask me anything about the system\n\n*Try saying: "Go to invoice" or "How do I create a customer?"*`,
           timestamp: new Date(),
         };
         setMessages([greeting]);
@@ -468,22 +657,55 @@ const AIChatBot: React.FC = () => {
     toast.success('Chat history cleared');
     
     // Show fresh greeting
+    const aiStatus = longCatConfigured 
+      ? '✨ **Powered by LongCat AI** - Advanced AI responses enabled'
+      : '⚠️ **Basic Mode** - Configure LongCat AI in Settings for enhanced responses';
+    
     const greeting: Message = {
       id: Date.now().toString(),
       role: 'assistant',
-      content: `🤖 **AI Control Center Active**\n\nI'm your intelligent assistant with **full system control**. I can:\n\n🧭 **Navigate** - "Go to sales" or "Open inventory"\n✨ **Create** - "Add new part" or "Create invoice"\n📊 **Analyze** - "Show reports" or "View dashboard"\n🔧 **Guide** - "Help with vouchers"\n\n*Try saying: "Go to invoice" or "Help me create a customer"*`,
+      content: `🤖 **AI Control Center Active**\n\n${aiStatus}\n\nI'm your intelligent assistant with **full system control**. I can:\n\n🧭 **Navigate** - "Go to sales" or "Open inventory"\n✨ **Create** - "Add new part" or "Create invoice"\n📊 **Analyze** - "Show reports" or "View dashboard"\n🔧 **Guide** - "Help with vouchers"\n💬 **Answer Questions** - Ask me anything about the system\n\n*Try saying: "Go to invoice" or "How do I create a customer?"*`,
       timestamp: new Date(),
     };
     setMessages([greeting]);
     setHasLoadedHistory(true);
-  }, []);
+  }, [longCatConfigured]);
 
-  // Auto-scroll to bottom
+  // Smooth auto-scroll to bottom when messages change
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
+    const performScroll = () => {
+      const scrollContainer = scrollRef.current;
+      if (!scrollContainer) return;
+
+      // Find the Radix ScrollArea viewport element (the actual scrollable element)
+      const viewport = scrollContainer.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
+      
+      if (viewport) {
+        // Use both requestAnimationFrame and a small delay to ensure DOM is ready
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            viewport.scrollTo({
+              top: viewport.scrollHeight + 1000, // Add extra to ensure we're at bottom
+              behavior: 'smooth'
+            });
+            // Also set scrollTop directly as backup
+            viewport.scrollTop = viewport.scrollHeight;
+          }, 50);
+        });
+      }
+    };
+
+    // Multiple attempts to ensure scroll happens
+    const timeout1 = setTimeout(performScroll, 100);
+    const timeout2 = setTimeout(performScroll, 200);
+    const timeout3 = setTimeout(performScroll, 300);
+    
+    return () => {
+      clearTimeout(timeout1);
+      clearTimeout(timeout2);
+      clearTimeout(timeout3);
+    };
+  }, [messages, isTyping]);
 
   // Focus input when opened
   useEffect(() => {
@@ -492,8 +714,45 @@ const AIChatBot: React.FC = () => {
     }
   }, [isOpen, isMinimized]);
 
-  // Handle message send with intelligent processing
-  const handleSend = useCallback(() => {
+  // Get system prompt with current context
+  const getSystemPrompt = useCallback(() => {
+    const recentContext = conversationContext.slice(-3).join('\n');
+    return SYSTEM_PROMPT
+      .replace('{CURRENT_PATH}', pathname)
+      .replace('{CONVERSATION_HISTORY}', recentContext || 'No recent conversation');
+  }, [pathname, conversationContext]);
+
+  // Smooth scroll to bottom helper - more aggressive
+  const scrollToBottom = useCallback((smooth = true) => {
+    const scrollContainer = scrollRef.current;
+    if (!scrollContainer) return;
+
+    const performScroll = () => {
+      // Find the Radix ScrollArea viewport element
+      const viewport = scrollContainer.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
+      
+      if (viewport) {
+        if (smooth) {
+          viewport.scrollTo({
+            top: viewport.scrollHeight + 1000,
+            behavior: 'smooth'
+          });
+        }
+        // Always set scrollTop directly as well (instant scroll)
+        viewport.scrollTop = viewport.scrollHeight;
+      }
+    };
+
+    // Multiple attempts to ensure it scrolls
+    requestAnimationFrame(() => {
+      performScroll();
+      setTimeout(performScroll, 50);
+      setTimeout(performScroll, 100);
+    });
+  }, []);
+
+  // Handle message send with LongCat AI integration
+  const handleSend = useCallback(async () => {
     if (!input.trim()) return;
 
     const userMessage: Message = {
@@ -505,19 +764,147 @@ const AIChatBot: React.FC = () => {
 
     setMessages(prev => [...prev, userMessage]);
     setConversationContext(prev => [...prev.slice(-5), input.trim()]);
+    const currentInput = input.trim();
     setInput('');
     setIsTyping(true);
 
-    // Process intent and generate response
-    const intent = processUserIntent(input.trim());
-    
-    setTimeout(() => {
+    // Smooth scroll to show user message immediately
+    setTimeout(() => scrollToBottom(true), 100);
+
+    try {
+      // First, check if it's a navigation/action command (high confidence)
+      const intent = processUserIntent(currentInput);
+      
+      // If it's a high-confidence navigation, handle it immediately
+      if (intent.type === 'navigate' && intent.confidence >= 0.9) {
+        const response = generateSmartResponse(intent);
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: response.content,
+          timestamp: new Date(),
+          actions: response.actions,
+        };
+        
+      setMessages(prev => [...prev, assistantMessage]);
+      setIsTyping(false);
+      
+      // Smooth scroll to show response
+      setTimeout(() => scrollToBottom(true), 200);
+      
+      // Auto-execute navigation
+      if (response.actions?.[0]) {
+        setTimeout(() => {
+          response.actions![0].action();
+        }, 500);
+      }
+      return;
+    }
+
+      // For other queries, use LongCat AI if configured
+      if (!longCatConfigured) {
+        // Fallback to rule-based response
+        const intent = processUserIntent(currentInput);
+        const response = generateSmartResponse(intent);
+        
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: response.content + '\n\n💡 *Tip: Configure LongCat AI in Settings → LongCat AI for enhanced AI-powered responses.*',
+          timestamp: new Date(),
+          actions: response.actions,
+        };
+        
+        setMessages(prev => [...prev, assistantMessage]);
+        setIsTyping(false);
+        
+        // Smooth scroll to show response
+        setTimeout(() => scrollToBottom(true), 100);
+        return;
+      }
+
+      // Build conversation history for context
+      const conversationHistory = messages
+        .slice(-10) // Last 10 messages for context
+        .map(msg => ({
+          role: msg.role,
+          content: msg.content,
+        }));
+
+      // Add system message
+      const systemMessage = {
+        role: 'system',
+        content: getSystemPrompt(),
+      };
+
+      // Add current user message
+      const messagesForAPI = [
+        systemMessage,
+        ...conversationHistory,
+        {
+          role: 'user',
+          content: currentInput,
+        },
+      ];
+
+      // Call LongCat API
+      const response = await apiClient.sendLongCatChat({
+        messages: messagesForAPI,
+        max_tokens: 1000,
+        temperature: 0.7,
+      });
+
+      if (response.error) {
+        throw new Error(response.error);
+      }
+
+      let aiResponse = '';
+      if (response.data?.choices?.[0]?.message?.content) {
+        aiResponse = response.data.choices[0].message.content;
+      } else if (response.data?.content) {
+        // Handle Anthropic format
+        const content = Array.isArray(response.data.content) 
+          ? response.data.content.find((c: any) => c.type === 'text')?.text 
+          : response.data.content;
+        aiResponse = content || 'I apologize, but I couldn\'t generate a response.';
+      } else {
+        aiResponse = 'I apologize, but I couldn\'t generate a response.';
+      }
+
+      // Check if AI response suggests navigation
+      const navIntent = processUserIntent(aiResponse);
+      let actions: ActionButton[] | undefined;
+      
+      if (navIntent.type === 'navigate' && navIntent.confidence >= 0.7) {
+        const navResponse = generateSmartResponse(navIntent);
+        actions = navResponse.actions;
+      }
+
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: aiResponse,
+        timestamp: new Date(),
+        actions,
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
+      setIsTyping(false);
+      
+      // Smooth scroll to show AI response after a brief delay
+      setTimeout(() => scrollToBottom(true), 250);
+
+    } catch (error: any) {
+      console.error('LongCat API error:', error);
+      
+      // Fallback to rule-based response
+      const intent = processUserIntent(currentInput);
       const response = generateSmartResponse(intent);
       
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: response.content,
+        content: response.content + '\n\n⚠️ *Note: AI service unavailable. Using fallback response. Please check LongCat API settings in Settings → LongCat AI.*',
         timestamp: new Date(),
         actions: response.actions,
       };
@@ -525,14 +912,12 @@ const AIChatBot: React.FC = () => {
       setMessages(prev => [...prev, assistantMessage]);
       setIsTyping(false);
       
-      // Auto-execute high confidence navigation
-      if (intent.type === 'navigate' && intent.confidence >= 0.85 && response.actions?.[0]) {
-        setTimeout(() => {
-          response.actions![0].action();
-        }, 500);
-      }
-    }, 600);
-  }, [input, processUserIntent, generateSmartResponse]);
+      // Smooth scroll to show fallback response
+      setTimeout(() => scrollToBottom(true), 200);
+      
+      toast.error('AI service unavailable. Using fallback mode.');
+    }
+  }, [input, messages, processUserIntent, generateSmartResponse, getSystemPrompt, navigate, longCatConfigured, scrollToBottom]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -589,52 +974,75 @@ const AIChatBot: React.FC = () => {
     return (
       <Button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg z-50 bg-primary hover:bg-primary/90 group"
+        className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 h-12 w-12 sm:h-14 sm:w-14 rounded-full shadow-lg z-50 bg-primary hover:bg-primary/90 group"
         size="icon"
       >
-        <Brain className="h-6 w-6 group-hover:scale-110 transition-transform" />
+        <Brain className="h-5 w-5 sm:h-6 sm:w-6 group-hover:scale-110 transition-transform" />
       </Button>
     );
   }
 
   return (
-    <div
-      className={cn(
-        "fixed bottom-6 right-6 z-50 bg-card border border-border rounded-xl shadow-2xl transition-all duration-300 flex flex-col overflow-hidden",
-        isMinimized ? "w-72 h-14" : "w-80 sm:w-[400px] max-h-[calc(100vh-100px)] h-[500px]"
+    <>
+      {/* Backdrop for mobile */}
+      {isOpen && !isMinimized && (
+        <div 
+          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 sm:hidden"
+          onClick={() => setIsOpen(false)}
+        />
       )}
-    >
+      
+      <div
+        className={cn(
+          "fixed z-50 bg-card border-2 border-primary/30 rounded-xl shadow-2xl transition-all duration-300 flex flex-col overflow-hidden",
+          // Enhanced shadow and glow effect
+          "ring-2 ring-primary/10 shadow-[0_0_20px_rgba(0,0,0,0.1)]",
+          // Mobile: Full screen or nearly full screen with proper margins
+          "bottom-0 right-0 left-0 sm:bottom-6 sm:right-6 sm:left-auto",
+          // Ensure it doesn't overlap with header/sidebar
+          "sm:max-w-[calc(100vw-2rem)]",
+          isMinimized 
+            ? "w-full sm:w-72 h-14 rounded-b-xl sm:rounded-xl" 
+            : "w-full sm:w-[400px] md:w-[450px] lg:w-[500px] h-[calc(100vh-60px)] sm:h-[500px] sm:max-h-[calc(100vh-120px)] rounded-t-xl sm:rounded-xl"
+        )}
+        style={{
+          // Ensure it stays within viewport
+          maxHeight: 'calc(100vh - 80px)',
+          // Add subtle glow
+          boxShadow: '0 0 30px rgba(0, 0, 0, 0.15), 0 0 60px rgba(var(--primary), 0.1)',
+        }}
+      >
       {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-border bg-gradient-to-r from-primary/10 to-primary/5 rounded-t-xl">
+      <div className="flex items-center justify-between p-2 sm:p-3 border-b-2 border-primary/20 bg-gradient-to-r from-primary/10 via-primary/5 to-primary/10 rounded-t-xl">
         <div className="flex items-center gap-2">
-          <div className="h-9 w-9 rounded-full bg-primary/20 flex items-center justify-center relative">
-            <Brain className="h-5 w-5 text-primary" />
-            <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 bg-green-500 rounded-full border-2 border-card animate-pulse" />
+          <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-primary/20 flex items-center justify-center relative shrink-0">
+            <Brain className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
+            <span className="absolute -top-0.5 -right-0.5 h-2 w-2 sm:h-2.5 sm:w-2.5 bg-green-500 rounded-full border-2 border-card animate-pulse" />
           </div>
-          <div>
-            <p className="font-semibold text-sm text-foreground flex items-center gap-1.5">
+          <div className="min-w-0">
+            <p className="font-semibold text-xs sm:text-sm text-foreground flex items-center gap-1.5 truncate">
               AI Control Center
-              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              <Sparkles className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-primary shrink-0" />
             </p>
-            <p className="text-xs text-muted-foreground">Intelligent System Assistant</p>
+            <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Intelligent System Assistant</p>
           </div>
         </div>
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-0.5 shrink-0">
           {!isMinimized && messages.length > 1 && (
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 hover:bg-destructive/10 hover:text-destructive"
+              className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-destructive/10 hover:text-destructive"
               onClick={clearHistory}
               title="Clear chat history"
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </Button>
           )}
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 hover:bg-primary/10"
+            className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-primary/10 hidden sm:flex"
             onClick={() => setIsMinimized(!isMinimized)}
           >
             {isMinimized ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
@@ -642,7 +1050,7 @@ const AIChatBot: React.FC = () => {
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 hover:bg-destructive/10 hover:text-destructive"
+            className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-destructive/10 hover:text-destructive"
             onClick={() => setIsOpen(false)}
           >
             <X className="h-4 w-4" />
@@ -653,42 +1061,42 @@ const AIChatBot: React.FC = () => {
       {!isMinimized && (
         <>
           {/* Messages */}
-          <ScrollArea className="flex-1 min-h-0 p-4" ref={scrollRef}>
-            <div className="space-y-4">
+          <ScrollArea className="flex-1 min-h-0 p-3 sm:p-4 bg-background/50" ref={scrollRef}>
+            <div className="space-y-3 sm:space-y-4 pb-4">
               {messages.map((message) => (
                 <div
                   key={message.id}
                   className={cn(
-                    "flex",
+                    "flex animate-in fade-in slide-in-from-bottom-2 duration-300",
                     message.role === 'user' ? 'justify-end' : 'justify-start'
                   )}
                 >
-                  <div className="max-w-[90%] space-y-2">
+                  <div className="max-w-[85%] sm:max-w-[90%] space-y-1.5 sm:space-y-2">
                     <div
                       className={cn(
-                        "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
+                        "rounded-xl sm:rounded-2xl px-3 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm leading-relaxed transition-all",
                         message.role === 'user'
-                          ? 'bg-primary text-primary-foreground rounded-br-md'
-                          : 'bg-muted text-foreground rounded-bl-md'
+                          ? 'bg-primary text-primary-foreground rounded-br-md shadow-sm'
+                          : 'bg-muted text-foreground rounded-bl-md shadow-sm'
                       )}
                     >
-                      <div className="whitespace-pre-wrap">{message.content.replace(/\*\*(.*?)\*\*/g, '$1')}</div>
+                      <div className="whitespace-pre-wrap break-words">{message.content.replace(/\*\*(.*?)\*\*/g, '$1')}</div>
                     </div>
                     
                     {/* Action buttons */}
                     {message.actions && message.actions.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-2">
+                      <div className="flex flex-wrap gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
                         {message.actions.map((action, idx) => (
                           <Button
                             key={idx}
                             variant={action.variant || 'default'}
                             size="sm"
-                            className="h-8 text-xs gap-1.5"
+                            className="h-7 sm:h-8 text-[10px] sm:text-xs gap-1 sm:gap-1.5 px-2 sm:px-3"
                             onClick={action.action}
                           >
-                            {action.icon}
-                            {action.label}
-                            <ArrowRight className="h-3 w-3" />
+                            <span className="scale-75 sm:scale-100">{action.icon}</span>
+                            <span className="truncate">{action.label}</span>
+                            <ArrowRight className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
                           </Button>
                         ))}
                       </div>
@@ -698,15 +1106,15 @@ const AIChatBot: React.FC = () => {
               ))}
               
               {isTyping && (
-                <div className="flex justify-start">
-                  <div className="bg-muted rounded-2xl rounded-bl-md px-4 py-3 text-sm">
+                <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <div className="bg-muted rounded-xl sm:rounded-2xl rounded-bl-md px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm">
                     <div className="flex gap-1.5 items-center">
                       <div className="flex gap-1">
-                        <span className="h-2 w-2 bg-primary/60 rounded-full animate-bounce" />
-                        <span className="h-2 w-2 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
-                        <span className="h-2 w-2 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
+                        <span className="h-1.5 w-1.5 sm:h-2 sm:w-2 bg-primary/60 rounded-full animate-bounce" />
+                        <span className="h-1.5 w-1.5 sm:h-2 sm:w-2 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
+                        <span className="h-1.5 w-1.5 sm:h-2 sm:w-2 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
                       </div>
-                      <span className="text-xs text-muted-foreground ml-2">Thinking...</span>
+                      <span className="text-[10px] sm:text-xs text-muted-foreground ml-2">Thinking...</span>
                     </div>
                   </div>
                 </div>
@@ -715,39 +1123,39 @@ const AIChatBot: React.FC = () => {
           </ScrollArea>
 
           {/* Quick Actions */}
-          <div className="px-3 py-2 border-t border-border bg-muted/30">
-            <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
-              <Zap className="h-3 w-3" /> Quick Actions
+          <div className="px-2 sm:px-3 py-1.5 sm:py-2 border-t-2 border-primary/10 bg-gradient-to-r from-muted/40 to-muted/20">
+            <p className="text-[10px] sm:text-xs text-muted-foreground mb-1.5 sm:mb-2 flex items-center gap-1">
+              <Zap className="h-2.5 w-2.5 sm:h-3 sm:w-3" /> Quick Actions
             </p>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-1 sm:gap-1.5">
               {getQuickActions().map((action, index) => (
                 <Button
                   key={index}
                   variant="outline"
                   size="sm"
-                  className="h-7 text-xs gap-1 bg-background hover:bg-primary/10 hover:border-primary/30"
+                  className="h-6 sm:h-7 text-[10px] sm:text-xs gap-1 bg-background hover:bg-primary/10 hover:border-primary/30 px-2 sm:px-3"
                   onClick={() => handleQuickAction(action)}
                 >
-                  {action.icon}
-                  {action.label}
+                  <span className="scale-75 sm:scale-100">{action.icon}</span>
+                  <span className="truncate">{action.label}</span>
                 </Button>
               ))}
             </div>
           </div>
 
           {/* Input */}
-          <div className="p-3 border-t border-border bg-background">
-            <div className="flex items-center gap-2">
-              <div className="flex-1 relative">
+          <div className="p-2 sm:p-3 border-t-2 border-primary/20 bg-gradient-to-r from-background to-muted/30 rounded-b-xl">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="flex-1 relative min-w-0">
                 <Input
                   ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder={isListening ? "🎤 Listening..." : "Ask me anything or say 'Go to...'"}
+                  placeholder={isListening ? "🎤 Listening..." : "Ask me anything..."}
                   className={cn(
-                    "pr-4 h-10 bg-muted/50 border-border focus-visible:ring-1 focus-visible:ring-primary rounded-xl",
-                    isListening && "border-primary animate-pulse"
+                    "pr-3 sm:pr-4 h-9 sm:h-10 bg-muted/50 border-border focus-visible:ring-1 focus-visible:ring-primary rounded-lg sm:rounded-xl transition-all text-xs sm:text-sm",
+                    isListening && "border-primary animate-pulse ring-2 ring-primary/20"
                   )}
                 />
               </div>
@@ -756,25 +1164,26 @@ const AIChatBot: React.FC = () => {
                 size="icon" 
                 variant={isListening ? "destructive" : "ghost"}
                 className={cn(
-                  "h-10 w-10 shrink-0 rounded-xl",
+                  "h-9 w-9 sm:h-10 sm:w-10 shrink-0 rounded-lg sm:rounded-xl",
                   isListening && "animate-pulse"
                 )}
               >
-                {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                {isListening ? <MicOff className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : <Mic className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
               </Button>
               <Button 
                 onClick={handleSend} 
                 size="icon" 
                 disabled={!input.trim()}
-                className="h-10 w-10 shrink-0 rounded-xl"
+                className="h-9 w-9 sm:h-10 sm:w-10 shrink-0 rounded-lg sm:rounded-xl transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Send className="h-4 w-4" />
+                <Send className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               </Button>
             </div>
           </div>
         </>
       )}
-    </div>
+      </div>
+    </>
   );
 };
 

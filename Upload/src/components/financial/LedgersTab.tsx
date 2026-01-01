@@ -113,6 +113,9 @@ export const LedgersTab = () => {
       if (response.data) {
         setEntries(response.data);
         setTotalEntries(response.pagination?.total || 0);
+      } else {
+        setEntries([]);
+        setTotalEntries(0);
       }
     } catch (error: any) {
       toast({

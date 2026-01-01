@@ -178,9 +178,10 @@ async function importAllData() {
           }
         }
         
-        // Handle Application
+        // Handle Application (skip only truly invalid application names)
         let applicationId = null;
-        if (categoryName && subcategoryName && applicationName) {
+        if (categoryName && subcategoryName && applicationName && 
+            applicationName !== '.' && applicationName !== '-' && applicationName !== '') {
           const catMap = applicationMap.get(categoryName);
           if (catMap) {
             const subMap = catMap.get(subcategoryName);

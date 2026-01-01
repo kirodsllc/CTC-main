@@ -25,7 +25,16 @@ interface JournalVoucherFormProps {
 export const JournalVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSave }: JournalVoucherFormProps) => {
   const { toast } = useToast();
   const [name, setName] = useState("");
-  const [date, setDate] = useState(new Date().toLocaleDateString("en-GB").replace(/\//g, "/"));
+  // Initialize date in YYYY-MM-DD format for date input
+  const getTodayDate = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  
+  const [date, setDate] = useState(getTodayDate());
   const [drEntries, setDrEntries] = useState<JournalEntry[]>([
     { id: "dr-1", account: "", description: "", drAmount: 0, crAmount: 0, type: "dr" }
   ]);
@@ -61,6 +70,14 @@ export const JournalVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
     setCrEntries(crEntries.map(e => e.id === id ? { ...e, [field]: value } : e));
   };
 
+  // Format amount helper
+  const formatAmount = (amount: number): string => {
+    return amount.toLocaleString("en-PK", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  };
+
   const totalDr = drEntries.reduce((sum, e) => sum + (Number(e.drAmount) || 0), 0);
   const totalCr = crEntries.reduce((sum, e) => sum + (Number(e.crAmount) || 0), 0);
 
@@ -78,7 +95,11 @@ export const JournalVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
       return;
     }
     if (totalDr !== totalCr) {
-      toast({ title: "Error", description: "Total Dr must equal Total Cr", variant: "destructive" });
+      toast({ 
+        title: "Error", 
+        description: `Total Dr (${formatAmount(totalDr)}) must equal Total Cr (${formatAmount(totalCr)})`, 
+        variant: "destructive" 
+      });
       return;
     }
 
@@ -136,6 +157,7 @@ export const JournalVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
           <div className="relative">
             <Label className="absolute -top-2 left-2 bg-background px-1 text-xs text-muted-foreground z-10">Date</Label>
             <Input
+              type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
               className="h-11 bg-muted/30"
@@ -186,7 +208,12 @@ export const JournalVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
                 type="number"
                 placeholder="amount"
                 value={entry.drAmount || ""}
-                onChange={(e) => updateDrEntry(entry.id, "drAmount", parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  const value = parseFloat(e.target.value) || 0;
+                  updateDrEntry(entry.id, "drAmount", value);
+                }}
+                step="0.01"
+                min="0"
                 className="h-10"
               />
             </div>
@@ -248,7 +275,12 @@ export const JournalVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
                 type="number"
                 placeholder="amount"
                 value={entry.crAmount || ""}
-                onChange={(e) => updateCrEntry(entry.id, "crAmount", parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  const value = parseFloat(e.target.value) || 0;
+                  updateCrEntry(entry.id, "crAmount", value);
+                }}
+                step="0.01"
+                min="0"
                 className="h-10"
               />
             </div>
@@ -273,26 +305,38 @@ export const JournalVoucherForm = ({ accounts, onAddSubgroup, onAddAccount, onSa
           </div>
           <div className="col-span-2">
             <div className="relative">
-              <Label className="absolute -top-2 left-2 bg-background px-1 text-xs text-muted-foreground z-10">Total Amount</Label>
+              <Label className="absolute -top-2 left-2 bg-background px-1 text-xs text-muted-foreground z-10">Total Dr</Label>
               <Input
-                value={totalDr}
+                value={formatAmount(totalDr)}
                 readOnly
-                className="h-10 bg-muted/30 font-medium"
+                className={`h-10 bg-muted/30 font-medium ${totalDr !== totalCr ? 'border-destructive' : 'border-green-500'}`}
               />
             </div>
           </div>
           <div className="col-span-2">
             <div className="relative">
-              <Label className="absolute -top-2 left-2 bg-background px-1 text-xs text-muted-foreground z-10">Total Amount</Label>
+              <Label className="absolute -top-2 left-2 bg-background px-1 text-xs text-muted-foreground z-10">Total Cr</Label>
               <Input
-                value={totalCr}
+                value={formatAmount(totalCr)}
                 readOnly
-                className="h-10 bg-muted/30 font-medium"
+                className={`h-10 bg-muted/30 font-medium ${totalDr !== totalCr ? 'border-destructive' : 'border-green-500'}`}
               />
             </div>
           </div>
           <div className="col-span-1"></div>
         </div>
+        {totalDr !== totalCr && totalDr > 0 && totalCr > 0 && (
+          <div className="text-sm text-destructive text-center pt-2">
+            ⚠️ Total Dr ({formatAmount(totalDr)}) must equal Total Cr ({formatAmount(totalCr)})
+            <br />
+            <span className="text-xs">Difference: {formatAmount(Math.abs(totalDr - totalCr))}</span>
+          </div>
+        )}
+        {totalDr === totalCr && totalDr > 0 && (
+          <div className="text-sm text-green-600 text-center pt-2">
+            ✓ Totals are balanced
+          </div>
+        )}
 
         {/* Add Buttons */}
         <div className="grid grid-cols-12 gap-4">

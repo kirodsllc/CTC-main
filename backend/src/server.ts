@@ -17,6 +17,7 @@ import approvalFlowsRoutes from './routes/approval-flows';
 import backupsRoutes from './routes/backups';
 import companyProfileRoutes from './routes/company-profile';
 import whatsappSettingsRoutes from './routes/whatsapp-settings';
+import longcatSettingsRoutes from './routes/longcat-settings';
 import kitsRoutes from './routes/kits';
 
 dotenv.config();
@@ -60,8 +61,9 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Increase body parser limit to handle image uploads (base64 encoded images can be large)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Health check
 app.get('/health', (req, res) => {
@@ -85,6 +87,7 @@ app.use('/api/approval-flows', approvalFlowsRoutes);
 app.use('/api/backups', backupsRoutes);
 app.use('/api/company-profile', companyProfileRoutes);
 app.use('/api/whatsapp-settings', whatsappSettingsRoutes);
+app.use('/api/longcat-settings', longcatSettingsRoutes);
 app.use('/api/kits', kitsRoutes);
 
 // Error handling middleware

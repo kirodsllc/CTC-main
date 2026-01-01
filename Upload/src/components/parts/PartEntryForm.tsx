@@ -443,12 +443,19 @@ export const PartEntryForm = ({ onSave, selectedPart, onClearSelection }: PartEn
                     <SelectValue placeholder="Select Origin" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="local" className="text-xs">Local</SelectItem>
-                    <SelectItem value="import" className="text-xs">Import</SelectItem>
-                    <SelectItem value="china" className="text-xs">China</SelectItem>
-                    <SelectItem value="japan" className="text-xs">Japan</SelectItem>
-                    <SelectItem value="germany" className="text-xs">Germany</SelectItem>
-                    <SelectItem value="ppr" className="text-xs">PPR</SelectItem>
+                    <SelectItem value="PRC" className="text-xs">PRC</SelectItem>
+                    <SelectItem value="ITAL" className="text-xs">ITAL</SelectItem>
+                    <SelectItem value="USA" className="text-xs">USA</SelectItem>
+                    <SelectItem value="TURK" className="text-xs">TURK</SelectItem>
+                    <SelectItem value="IND" className="text-xs">IND</SelectItem>
+                    <SelectItem value="UK" className="text-xs">UK</SelectItem>
+                    <SelectItem value="CHN" className="text-xs">CHN</SelectItem>
+                    <SelectItem value="SAM" className="text-xs">SAM</SelectItem>
+                    <SelectItem value="TAIW" className="text-xs">TAIW</SelectItem>
+                    <SelectItem value="KOR" className="text-xs">KOR</SelectItem>
+                    <SelectItem value="GER" className="text-xs">GER</SelectItem>
+                    <SelectItem value="JAP" className="text-xs">JAP</SelectItem>
+                    <SelectItem value="AFR" className="text-xs">AFR</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -594,7 +601,7 @@ export const PartEntryForm = ({ onSave, selectedPart, onClearSelection }: PartEn
       </div>
 
       {/* Right Panel - Model and Quantity */}
-      <div className="w-56 bg-card rounded-lg border border-border p-3">
+      <div className="w-72 bg-card rounded-lg border border-border p-3">
         <div className="flex items-start justify-between mb-3">
           <div>
             <div className="flex items-center gap-1.5">
@@ -610,30 +617,30 @@ export const PartEntryForm = ({ onSave, selectedPart, onClearSelection }: PartEn
         </div>
 
         <div className="border-t border-border pt-3">
-          <div className="grid grid-cols-3 gap-1.5 mb-2 text-xs text-muted-foreground">
+          <div className="grid grid-cols-[2fr_1.5fr_0.8fr] gap-2 mb-2 text-xs text-muted-foreground">
             <span>Model</span>
             <span>Qty. Used</span>
-            <span>Action</span>
+            <span className="text-center">Action</span>
           </div>
 
           {modelQuantities.map((mq) => (
-            <div key={mq.id} className="grid grid-cols-3 gap-1.5 mb-1.5 items-center">
+            <div key={mq.id} className="grid grid-cols-[2fr_1.5fr_0.8fr] gap-2 mb-1.5 items-center">
               <Input
-                placeholder="Enter mc"
+                placeholder="Enter model"
                 value={mq.model}
                 onChange={(e) => handleModelChange(mq.id, "model", e.target.value)}
-                className="h-7 text-xs"
+                className="h-8 text-sm"
               />
               <Input
                 type="number"
                 value={mq.qty || ""}
                 onChange={(e) => handleModelChange(mq.id, "qty", parseInt(e.target.value) || 0)}
-                className="h-7 text-xs"
+                className="h-8 text-sm"
               />
               <Button
                 variant="outline"
                 size="icon"
-                className="h-7 w-7 text-destructive border-destructive hover:bg-destructive hover:text-destructive-foreground"
+                className="h-8 w-8 text-destructive border-destructive hover:bg-destructive hover:text-destructive-foreground mx-auto"
                 onClick={() => handleRemoveModel(mq.id)}
               >
                 ✕

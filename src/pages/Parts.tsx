@@ -103,6 +103,12 @@ const Parts = () => {
       if (response.data && Array.isArray(response.data)) {
         // Transform API data to Item format for ItemsListView
         const transformedItems: Item[] = response.data.map((p: any) => {
+          // Handle application - check multiple possible fields
+          const applicationName = p.application_name || 
+                                  p.application?.name || 
+                                  (p.application && typeof p.application === 'object' && p.application.name ? p.application.name : null) ||
+                                  "";
+          
           return {
             id: p.id,
             masterPartNo: p.master_part_no || "",
@@ -111,7 +117,7 @@ const Parts = () => {
             description: p.description || "",
             category: p.category_name || (p.category?.name) || "",
             subCategory: p.subcategory_name || (p.subcategory?.name) || "",
-            application: p.application_name || (p.application?.name) || "",
+            application: applicationName || "",
             status: p.status === "active" ? "Active" : "Inactive",
             images: [p.image_p1, p.image_p2].filter(img => img && img.trim() !== ''),
           };
@@ -158,10 +164,21 @@ const Parts = () => {
     try {
       setLoading(true);
       
+      // Validate required fields
+      if (!partData.partNo || String(partData.partNo).trim() === '') {
+        toast({
+          title: "Validation Error",
+          description: "Part number is required",
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
+      
       // Transform form data to API format
       const apiData: any = {
         master_part_no: partData.masterPartNo || null,
-        part_no: partData.partNo,
+        part_no: String(partData.partNo).trim(),
         brand_name: partData.brand || null,
         description: partData.description || null,
         category_id: partData.categoryId || partData.category || null,
@@ -178,10 +195,12 @@ const Parts = () => {
         smc: partData.smc || null,
         size: partData.size || null,
         status: partData.status === "A" ? "active" : "inactive",
-        models: partData.modelQuantities?.map((mq: any) => ({
-          name: mq.model,
-          qty_used: mq.qty || 1,
-        })) || [],
+        models: partData.modelQuantities
+          ?.filter((mq: any) => mq && mq.model && String(mq.model).trim() !== '')
+          .map((mq: any) => ({
+            name: String(mq.model).trim(),
+            qty_used: mq.qty || 1,
+          })) || [],
       };
 
       // Handle images - if updating, explicitly set to null if not provided to clear them
@@ -480,30 +499,72 @@ const Parts = () => {
               }}
               onDelete={async (item) => {
                 try {
-                  setItemsLoading(true);
+                  // Optimistically remove from UI
+                  setItems(prev => prev.filter(i => i.id !== item.id));
+                  setTotalItems(prev => Math.max(0, prev - 1));
+                  
                   const response = await apiClient.deletePart(item.id);
                   
                   if (response.error) {
                     throw new Error(response.error);
                   }
 
-                  // Refresh items list
-                  await fetchItems(itemsPage, itemsPerPage);
-
-                  toast({
-                    title: "Success",
-                    description: "Item deleted successfully",
+                  // Silently refresh in background to sync with server
+                  fetchItems(itemsPage, itemsPerPage).catch(err => {
+                    console.error("Background refresh failed:", err);
                   });
                 } catch (error: any) {
                   console.error("Error deleting item:", error);
+                  // Restore item on error
+                  fetchItems(itemsPage, itemsPerPage);
                   toast({
                     title: "Error",
                     description: error.message || "Failed to delete item",
                     variant: "destructive",
                   });
-                } finally {
-                  setItemsLoading(false);
                 }
+              }}
+              onBulkDelete={async (itemIds: string[]) => {
+                const success: string[] = [];
+                const failed: string[] = [];
+                
+                // Optimistically remove all items from UI
+                setItems(prev => {
+                  const removed = prev.filter(i => itemIds.includes(i.id));
+                  const remaining = prev.filter(i => !itemIds.includes(i.id));
+                  setTotalItems(prevTotal => Math.max(0, prevTotal - removed.length));
+                  return remaining;
+                });
+                
+                // Delete in background (parallel)
+                const deletePromises = itemIds.map(async (id) => {
+                  try {
+                    const response = await apiClient.deletePart(id);
+                    if (response.error) {
+                      throw new Error(response.error);
+                    }
+                    success.push(id);
+                  } catch (error: any) {
+                    console.error(`Error deleting item ${id}:`, error);
+                    failed.push(id);
+                  }
+                });
+                
+                await Promise.all(deletePromises);
+                
+                // Silently refresh in background to sync
+                fetchItems(itemsPage, itemsPerPage).catch(err => {
+                  console.error("Background refresh failed:", err);
+                });
+                
+                return { success, failed };
+              }}
+              onItemsUpdate={(updatedItems) => {
+                setItems(updatedItems);
+                setTotalItems(updatedItems.length);
+              }}
+              onImportComplete={() => {
+                fetchItems(itemsPage, itemsPerPage);
               }}
               onAddNew={() => {
                 setEditingItem(null);

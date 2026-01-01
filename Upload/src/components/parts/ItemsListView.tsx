@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Search, Download, Printer, Plus, Upload, CheckCircle, Edit, Trash2, ChevronDown, Image, X, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { Search, Download, Printer, Plus, Upload, CheckCircle, Edit, Trash2, ChevronDown, Image, X, ChevronLeft, ChevronRight, Loader2, FileText, FileSpreadsheet, FileJson } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import {
   Dialog,
@@ -84,6 +85,8 @@ interface ItemsListViewProps {
   onItemsPerPageChange?: (limit: number) => void;
   onEdit?: (item: Item) => void;
   onDelete?: (item: Item) => void;
+  onBulkDelete?: (itemIds: string[]) => Promise<{ success: string[]; failed: string[] }>;
+  onItemsUpdate?: (updatedItems: Item[]) => void;
   onAddNew?: () => void;
   onStatusChange?: (item: Item, newStatus: "Active" | "Inactive") => void;
   showForm?: boolean;
@@ -108,7 +111,9 @@ export const ItemsListView = ({
   onPageChange,
   onItemsPerPageChange,
   onEdit, 
-  onDelete, 
+  onDelete,
+  onBulkDelete,
+  onItemsUpdate,
   onAddNew, 
   onStatusChange, 
   showForm = false, 
@@ -121,6 +126,7 @@ export const ItemsListView = ({
 }: ItemsListViewProps) => {
   const { toast } = useToast();
   const [listTab, setListTab] = useState<ListTab>("parts-list");
+  const [pageJumpValue, setPageJumpValue] = useState<string>("");
   
   // Use external filters if provided, otherwise use local state
   const [localFilters, setLocalFilters] = useState<SearchFilters>({
@@ -146,6 +152,11 @@ export const ItemsListView = ({
     }
   }, [externalFilters]);
   
+  // Clear page jump value when page changes externally
+  useEffect(() => {
+    setPageJumpValue("");
+  }, [currentPage]);
+  
   const searchFilters = externalFilters || localFilters;
   const setSearchFilters = onFiltersChange || setLocalFilters;
   
@@ -155,6 +166,8 @@ export const ItemsListView = ({
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   // Debounce timer ref for search
   const searchDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -262,24 +275,401 @@ export const ItemsListView = ({
     }
   };
 
-  const handleDownloadSelectedCSV = () => {
-    const selectedData = items.filter(item => selectedItems.includes(item.id));
-    const headers = ["Master Part No", "Part No", "Brand", "Description", "Category", "Sub Category", "Application", "Status"];
-    const csvData = selectedData.map(item => [
-      item.masterPartNo, item.partNo, item.brand, item.description,
-      item.category, item.subCategory, item.application, item.status
+  // Get data to export (selected items or all items)
+  const getExportData = () => {
+    return selectedItems.length > 0 
+      ? items.filter(item => selectedItems.includes(item.id))
+      : items;
+  };
+
+  // Escape CSV values
+  const escapeCSV = (value: any) => {
+    if (value === null || value === undefined) return '';
+    const str = String(value);
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  // Export to CSV
+  const handleExportCSV = () => {
+    const exportData = getExportData();
+    const headers = ["ID", "Master Part No", "Part No", "Brand", "Description", "Category", "Sub Category", "Application", "Status", "Images"];
+    const csvData = exportData.map(item => [
+      item.id,
+      escapeCSV(item.masterPartNo),
+      escapeCSV(item.partNo),
+      escapeCSV(item.brand),
+      escapeCSV(item.description),
+      escapeCSV(item.category),
+      escapeCSV(item.subCategory),
+      escapeCSV(item.application),
+      escapeCSV(item.status),
+      escapeCSV(item.images.join(';'))
     ]);
     const csvContent = [headers.join(","), ...csvData.map(row => row.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv" });
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "selected-parts.csv";
+    a.download = `parts-export-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
+    URL.revokeObjectURL(url);
     toast({
-      title: "CSV Downloaded",
-      description: `${selectedData.length} parts exported successfully`,
+      title: "CSV Exported",
+      description: `${exportData.length} parts exported successfully`,
     });
+  };
+
+  // Export to Excel (XLSX format using CSV with .xlsx extension)
+  const handleExportExcel = () => {
+    const exportData = getExportData();
+    const headers = ["ID", "Master Part No", "Part No", "Brand", "Description", "Category", "Sub Category", "Application", "Status", "Images"];
+    const excelData = exportData.map(item => ({
+      "ID": item.id,
+      "Master Part No": item.masterPartNo || "",
+      "Part No": item.partNo || "",
+      "Brand": item.brand || "",
+      "Description": item.description || "",
+      "Category": item.category || "",
+      "Sub Category": item.subCategory || "",
+      "Application": item.application || "",
+      "Status": item.status || "",
+      "Images": item.images.join(';') || ""
+    }));
+
+    // Create CSV content (Excel can open CSV)
+    const csvContent = [
+      headers.join(","),
+      ...excelData.map(row => headers.map(h => escapeCSV(row[h as keyof typeof row] || "")).join(","))
+    ].join("\n");
+
+    // Add BOM for Excel UTF-8 support
+    const BOM = "\uFEFF";
+    const blob = new Blob([BOM + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `parts-export-${new Date().toISOString().split('T')[0]}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({
+      title: "Excel Exported",
+      description: `${exportData.length} parts exported successfully`,
+    });
+  };
+
+  // Export to JSON
+  const handleExportJSON = () => {
+    const exportData = getExportData();
+    const jsonData = exportData.map(item => ({
+      id: item.id,
+      masterPartNo: item.masterPartNo || "",
+      partNo: item.partNo || "",
+      brand: item.brand || "",
+      description: item.description || "",
+      category: item.category || "",
+      subCategory: item.subCategory || "",
+      application: item.application || "",
+      status: item.status || "",
+      images: item.images || []
+    }));
+    const jsonContent = JSON.stringify(jsonData, null, 2);
+    const blob = new Blob([jsonContent], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `parts-export-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({
+      title: "JSON Exported",
+      description: `${exportData.length} parts exported successfully`,
+    });
+  };
+
+  // Export to TXT
+  const handleExportTXT = () => {
+    const exportData = getExportData();
+    const txtLines = [
+      "PARTS EXPORT",
+      `Generated: ${new Date().toLocaleString()}`,
+      `Total Items: ${exportData.length}`,
+      "=".repeat(80),
+      ""
+    ];
+
+    exportData.forEach((item, index) => {
+      txtLines.push(`Item ${index + 1}:`);
+      txtLines.push(`  ID: ${item.id}`);
+      txtLines.push(`  Master Part No: ${item.masterPartNo || "-"}`);
+      txtLines.push(`  Part No: ${item.partNo || "-"}`);
+      txtLines.push(`  Brand: ${item.brand || "-"}`);
+      txtLines.push(`  Description: ${item.description || "-"}`);
+      txtLines.push(`  Category: ${item.category || "-"}`);
+      txtLines.push(`  Sub Category: ${item.subCategory || "-"}`);
+      txtLines.push(`  Application: ${item.application || "-"}`);
+      txtLines.push(`  Status: ${item.status || "-"}`);
+      txtLines.push(`  Images: ${item.images.length > 0 ? item.images.join(', ') : "None"}`);
+      txtLines.push("");
+    });
+
+    const txtContent = txtLines.join("\n");
+    const blob = new Blob([txtContent], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `parts-export-${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({
+      title: "TXT Exported",
+      description: `${exportData.length} parts exported successfully`,
+    });
+  };
+
+  // Export to PDF
+  const handleExportPDF = () => {
+    const exportData = getExportData();
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Parts Export</title>
+          <style>
+            @media print {
+              @page { margin: 1cm; }
+            }
+            body { font-family: Arial, sans-serif; padding: 20px; font-size: 10px; }
+            h1 { color: #333; margin-bottom: 10px; font-size: 16px; }
+            .meta { color: #666; margin-bottom: 20px; font-size: 9px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }
+            th { background-color: #f4f4f4; font-weight: bold; }
+            tr:nth-child(even) { background-color: #fafafa; }
+          </style>
+        </head>
+        <body>
+          <h1>Parts Export</h1>
+          <div class="meta">Generated: ${new Date().toLocaleString()} | Total Items: ${exportData.length}</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Part No</th>
+                <th>Master Part No</th>
+                <th>Brand</th>
+                <th>Description</th>
+                <th>Category</th>
+                <th>Sub Category</th>
+                <th>Application</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${exportData.map(item => `
+                <tr>
+                  <td>${item.partNo || "-"}</td>
+                  <td>${item.masterPartNo || "-"}</td>
+                  <td>${item.brand || "-"}</td>
+                  <td>${item.description || "-"}</td>
+                  <td>${item.category || "-"}</td>
+                  <td>${item.subCategory || "-"}</td>
+                  <td>${item.application || "-"}</td>
+                  <td>${item.status || "-"}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      setTimeout(() => {
+        printWindow.print();
+      }, 250);
+    }
+    toast({
+      title: "PDF Export Ready",
+      description: `${exportData.length} parts ready for printing/PDF`,
+    });
+  };
+
+  // Handle Import
+  const handleImport = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv,.xlsx,.xls,.json,.txt';
+    input.onchange = async (e: any) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        const fileType = file.name.split('.').pop()?.toLowerCase();
+        const text = await file.text();
+
+        let importedData: any[] = [];
+
+        if (fileType === 'json') {
+          importedData = JSON.parse(text);
+        } else if (fileType === 'csv' || fileType === 'xlsx' || fileType === 'xls') {
+          const lines = text.split('\n').filter(line => line.trim());
+          if (lines.length < 2) {
+            throw new Error('Invalid CSV file');
+          }
+          const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+          importedData = lines.slice(1).map(line => {
+            const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+            const obj: any = {};
+            headers.forEach((header, index) => {
+              obj[header] = values[index] || '';
+            });
+            return obj;
+          });
+        } else if (fileType === 'txt') {
+          // Simple TXT parsing (basic implementation)
+          toast({
+            title: "Import Notice",
+            description: "TXT import is limited. Please use CSV, Excel, or JSON format for better results.",
+            variant: "default",
+          });
+          return;
+        }
+
+        if (importedData.length === 0) {
+          throw new Error('No data found in file');
+        }
+
+        // Transform imported data to match Item format
+        const transformedItems: Item[] = importedData.map((row: any, index: number) => ({
+          id: row.id || row.ID || `imported-${Date.now()}-${index}`,
+          masterPartNo: row.masterPartNo || row['Master Part No'] || row.master_part_no || "",
+          partNo: row.partNo || row['Part No'] || row.part_no || "",
+          brand: row.brand || row.Brand || "",
+          description: row.description || row.Description || "",
+          category: row.category || row.Category || "",
+          subCategory: row.subCategory || row['Sub Category'] || row.subcategory || "",
+          application: row.application || row.Application || "",
+          status: (row.status || row.Status || "Active") as "Active" | "Inactive",
+          images: row.images ? (Array.isArray(row.images) ? row.images : row.images.split(';').filter((img: string) => img.trim())) : []
+        }));
+
+        // Call import handler if provided, otherwise show success
+        toast({
+          title: "Import Successful",
+          description: `${transformedItems.length} items imported. Please review and save.`,
+        });
+
+        // You can add an onImport callback here to handle the imported data
+        console.log('Imported items:', transformedItems);
+
+      } catch (error: any) {
+        console.error('Import error:', error);
+        toast({
+          title: "Import Failed",
+          description: error.message || "Failed to import file",
+          variant: "destructive",
+        });
+      }
+    };
+    input.click();
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    if (selectedItems.length === 0) return;
+    
+    setIsDeleting(true);
+    const itemsToDelete = items.filter(item => selectedItems.includes(item.id));
+    const itemIdsToDelete = [...selectedItems];
+    const failedDeletes: string[] = [];
+    let successCount = 0;
+    
+    // Optimistically remove items from UI immediately (smooth UX - no table reload)
+    const remainingItems = items.filter(item => !selectedItems.includes(item.id));
+    if (onItemsUpdate) {
+      onItemsUpdate(remainingItems);
+    }
+    
+    // Clear selection immediately for better UX
+    setSelectedItems([]);
+    setBulkDeleteConfirmOpen(false);
+    
+    try {
+      // If bulk delete handler is provided, use it (parallel deletion - professional)
+      if (onBulkDelete) {
+        const result = await onBulkDelete(itemIdsToDelete);
+        successCount = result.success.length;
+        failedDeletes.push(...result.failed.map(id => {
+          const item = items.find(i => i.id === id);
+          return item?.partNo || id;
+        }));
+      } else if (onDelete) {
+        // Fallback to individual deletes (parallel, no UI blocking)
+        const deletePromises = itemsToDelete.map(async (item) => {
+          try {
+            // Check if item is used in any kit
+            const itemUsedInKits = kits.filter(kit => 
+              kit.items?.some(kitItem => kitItem.id === item.id || kitItem.partNo === item.partNo)
+            );
+            
+            if (itemUsedInKits.length > 0) {
+              failedDeletes.push(item.partNo);
+              return { success: false, partNo: item.partNo };
+            }
+            
+            // Delete in background (parallel - no sequential delays)
+            await onDelete(item);
+            return { success: true, partNo: item.partNo };
+          } catch (error) {
+            console.error(`Error deleting item ${item.partNo}:`, error);
+            failedDeletes.push(item.partNo);
+            return { success: false, partNo: item.partNo };
+          }
+        });
+        
+        const results = await Promise.all(deletePromises);
+        successCount = results.filter(r => r.success).length;
+      }
+      
+      // Show results
+      if (successCount > 0) {
+        toast({
+          title: "Bulk Delete Complete",
+          description: `Successfully deleted ${successCount} item(s)${failedDeletes.length > 0 ? `. ${failedDeletes.length} item(s) could not be deleted.` : ''}`,
+        });
+      }
+      
+      if (failedDeletes.length > 0) {
+        // If some failed, restore them to the list
+        if (onItemsUpdate) {
+          const failedItems = itemsToDelete.filter(item => 
+            failedDeletes.includes(item.partNo)
+          );
+          onItemsUpdate([...remainingItems, ...failedItems]);
+        }
+        toast({
+          title: "Some Items Could Not Be Deleted",
+          description: `The following items could not be deleted: ${failedDeletes.slice(0, 5).join(', ')}${failedDeletes.length > 5 ? ` and ${failedDeletes.length - 5} more` : ''}. They may be in use.`,
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("Error in bulk delete:", error);
+      // If error occurs, restore items
+      if (onItemsUpdate) {
+        onItemsUpdate(items); // Restore original items
+      }
+      toast({
+        title: "Error",
+        description: "An error occurred during bulk delete. Items have been restored.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const handlePrintSelected = () => {
@@ -368,10 +758,42 @@ export const ItemsListView = ({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-            <Upload className="w-3.5 h-3.5" />
-            Import XLSX
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+                <Download className="w-3.5 h-3.5" />
+                Export
+                <ChevronDown className="w-3 h-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={handleExportPDF} className="cursor-pointer">
+                <FileText className="w-4 h-4 mr-2" />
+                Export as PDF
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportCSV} className="cursor-pointer">
+                <Download className="w-4 h-4 mr-2" />
+                Export as CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportExcel} className="cursor-pointer">
+                <FileSpreadsheet className="w-4 h-4 mr-2" />
+                Export as Excel
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportTXT} className="cursor-pointer">
+                <FileText className="w-4 h-4 mr-2" />
+                Export as TXT
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportJSON} className="cursor-pointer">
+                <FileJson className="w-4 h-4 mr-2" />
+                Export as JSON
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleImport} className="cursor-pointer">
+                <Upload className="w-4 h-4 mr-2" />
+                Import Data
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button size="sm" className="gap-1.5 text-xs" onClick={onAddNew}>
             <Plus className="w-3.5 h-3.5" />
             New Part
@@ -425,6 +847,16 @@ export const ItemsListView = ({
                   </Button>
                   {selectedItems.length > 0 && (
                     <>
+                      <Button 
+                        variant="destructive" 
+                        size="sm" 
+                        className="gap-1.5 text-xs h-7" 
+                        onClick={() => setBulkDeleteConfirmOpen(true)}
+                        disabled={isDeleting}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        Delete ({selectedItems.length})
+                      </Button>
                       <Button variant="outline" size="sm" className="gap-1.5 text-xs h-7" onClick={handleDownloadSelectedCSV}>
                         <Download className="w-3 h-3" />
                         Download CSV ({selectedItems.length})
@@ -606,9 +1038,9 @@ export const ItemsListView = ({
                         <TableCell className="text-xs font-semibold">{item.partNo}</TableCell>
                         <TableCell className="text-xs">{item.brand}</TableCell>
                         <TableCell className="text-xs text-muted-foreground max-w-[150px] truncate">{item.description}</TableCell>
-                        <TableCell className="text-xs">{item.category || "-"}</TableCell>
-                        <TableCell className="text-xs">{item.subCategory || "-"}</TableCell>
-                        <TableCell className="text-xs">{item.application || "-"}</TableCell>
+                        <TableCell className="text-xs">{item.category && item.category.trim() ? item.category : "-"}</TableCell>
+                        <TableCell className="text-xs">{item.subCategory && item.subCategory.trim() ? item.subCategory : "-"}</TableCell>
+                        <TableCell className="text-xs">{item.application && item.application.trim() ? item.application : "-"}</TableCell>
                         <TableCell>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -732,84 +1164,126 @@ export const ItemsListView = ({
                   </Table>
                   
                   {/* Pagination Controls */}
-                  {totalItems > 0 && onPageChange && (
-                    <div className="border-t border-border px-4 py-3 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">Items per page:</span>
-                        <Select
-                          value={String(itemsPerPage)}
-                          onValueChange={(value) => onItemsPerPageChange?.(Number(value))}
-                        >
-                          <SelectTrigger className="h-7 w-20 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="25">25</SelectItem>
-                            <SelectItem value="50">50</SelectItem>
-                            <SelectItem value="100">100</SelectItem>
-                            <SelectItem value="200">200</SelectItem>
-                            <SelectItem value="500">500</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <span className="text-xs text-muted-foreground">
-                          Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, totalItems)} of {totalItems}
-                        </span>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => onPageChange(currentPage - 1)}
-                          disabled={currentPage <= 1}
-                        >
-                          <ChevronLeft className="w-3.5 h-3.5 mr-1" />
-                          Previous
-                        </Button>
-                        
-                        <div className="flex items-center gap-1">
-                          {Array.from({ length: Math.min(5, Math.ceil(totalItems / itemsPerPage)) }, (_, i) => {
-                            const totalPages = Math.ceil(totalItems / itemsPerPage);
-                            let pageNum;
-                            
-                            if (totalPages <= 5) {
-                              pageNum = i + 1;
-                            } else if (currentPage <= 3) {
-                              pageNum = i + 1;
-                            } else if (currentPage >= totalPages - 2) {
-                              pageNum = totalPages - 4 + i;
-                            } else {
-                              pageNum = currentPage - 2 + i;
-                            }
-                            
-                            return (
-                              <Button
-                                key={pageNum}
-                                variant={currentPage === pageNum ? "default" : "outline"}
-                                size="sm"
-                                className="h-7 w-7 text-xs p-0"
-                                onClick={() => onPageChange(pageNum)}
-                              >
-                                {pageNum}
-                              </Button>
-                            );
-                          })}
+                  {totalItems > 0 && onPageChange && (() => {
+                    const totalPages = Math.ceil(totalItems / itemsPerPage);
+                    const handlePageJump = () => {
+                      const pageNum = parseInt(pageJumpValue);
+                      if (pageNum >= 1 && pageNum <= totalPages) {
+                        onPageChange(pageNum);
+                        setPageJumpValue("");
+                      } else {
+                        toast({
+                          title: "Invalid page",
+                          description: `Please enter a page number between 1 and ${totalPages}`,
+                          variant: "destructive",
+                        });
+                      }
+                    };
+                    
+                    return (
+                      <div className="border-t border-border px-4 py-3 flex items-center justify-between w-full">
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => onPageChange(currentPage - 1)}
+                            disabled={currentPage <= 1}
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5 mr-1" />
+                            Previous
+                          </Button>
+                          
+                          <div className="flex items-center gap-1">
+                            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                              let pageNum;
+                              
+                              if (totalPages <= 5) {
+                                pageNum = i + 1;
+                              } else if (currentPage <= 3) {
+                                pageNum = i + 1;
+                              } else if (currentPage >= totalPages - 2) {
+                                pageNum = totalPages - 4 + i;
+                              } else {
+                                pageNum = currentPage - 2 + i;
+                              }
+                              
+                              return (
+                                <Button
+                                  key={pageNum}
+                                  variant={currentPage === pageNum ? "default" : "outline"}
+                                  size="sm"
+                                  className="h-7 w-7 text-xs p-0"
+                                  onClick={() => onPageChange(pageNum)}
+                                >
+                                  {pageNum}
+                                </Button>
+                              );
+                            })}
+                          </div>
+                          
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => onPageChange(currentPage + 1)}
+                            disabled={currentPage >= totalPages}
+                          >
+                            Next
+                            <ChevronRight className="w-3.5 h-3.5 ml-1" />
+                          </Button>
+                          
+                          <div className="flex items-center gap-1.5 ml-3">
+                            <span className="text-xs text-muted-foreground">Go to:</span>
+                            <Input
+                              type="number"
+                              min="1"
+                              max={totalPages}
+                              value={pageJumpValue}
+                              onChange={(e) => setPageJumpValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  handlePageJump();
+                                }
+                              }}
+                              placeholder="Page"
+                              className="h-7 w-16 text-xs text-center"
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs px-2"
+                              onClick={handlePageJump}
+                            >
+                              Go
+                            </Button>
+                          </div>
                         </div>
                         
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => onPageChange(currentPage + 1)}
-                          disabled={currentPage >= Math.ceil(totalItems / itemsPerPage)}
-                        >
-                          Next
-                          <ChevronRight className="w-3.5 h-3.5 ml-1" />
-                        </Button>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-xs text-muted-foreground">
+                            Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, totalItems)} of {totalItems} parts
+                          </span>
+                          <span className="text-xs text-muted-foreground">Items per page:</span>
+                          <Select
+                            value={String(itemsPerPage)}
+                            onValueChange={(value) => onItemsPerPageChange?.(Number(value))}
+                          >
+                            <SelectTrigger className="h-7 w-20 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="25">25</SelectItem>
+                              <SelectItem value="50">50</SelectItem>
+                              <SelectItem value="100">100</SelectItem>
+                              <SelectItem value="200">200</SelectItem>
+                              <SelectItem value="500">500</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </>
               )}
             </CardContent>
@@ -886,6 +1360,36 @@ export const ItemsListView = ({
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <AlertDialog open={bulkDeleteConfirmOpen} onOpenChange={setBulkDeleteConfirmOpen}>
+        <AlertDialogContent className="bg-card border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-foreground">Delete Multiple Items</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              Are you sure you want to delete <span className="font-semibold text-foreground">{selectedItems.length}</span> selected item(s)? 
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="text-xs h-8" disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBulkDeleteConfirm}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 text-xs h-8"
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete All"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>

@@ -129,6 +129,13 @@ export const SupplierManagement = () => {
     }
   }, [currentPage, rowsPerPage, statusFilter, activeTab]);
 
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    if (activeTab === "suppliers" && currentPage !== 1) {
+      setCurrentPage(1);
+    }
+  }, [statusFilter, activeTab]);
+
   const totalPages = Math.ceil(totalRecords / rowsPerPage);
 
   const handleSelectAll = (checked: boolean) => {
@@ -359,7 +366,13 @@ export const SupplierManagement = () => {
             <div className="flex flex-wrap gap-3 items-end">
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Active/Inactive</Label>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <Select 
+                  value={statusFilter} 
+                  onValueChange={(value) => {
+                    setStatusFilter(value);
+                    setCurrentPage(1);
+                  }}
+                >
                   <SelectTrigger className="w-24 h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
@@ -372,7 +385,12 @@ export const SupplierManagement = () => {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">All Fields</Label>
-                <Select value={fieldFilter} onValueChange={setFieldFilter}>
+                <Select 
+                  value={fieldFilter} 
+                  onValueChange={(value) => {
+                    setFieldFilter(value);
+                  }}
+                >
                   <SelectTrigger className="w-28 h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
@@ -514,9 +532,15 @@ export const SupplierManagement = () => {
             {/* Pagination */}
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
-                Showing {Math.min((currentPage - 1) * rowsPerPage + 1, totalRecords)} to{" "}
-                {Math.min(currentPage * rowsPerPage, totalRecords)} of{" "}
-                {totalRecords} Records
+                {totalRecords === 0 ? (
+                  <>Showing 0 to 0 of 0 Records</>
+                ) : (
+                  <>
+                    Showing {Math.min((currentPage - 1) * rowsPerPage + 1, totalRecords)} to{" "}
+                    {Math.min(currentPage * rowsPerPage, totalRecords)} of{" "}
+                    {totalRecords} Records
+                  </>
+                )}
               </p>
               <div className="flex items-center gap-2">
                 <Select
@@ -524,7 +548,6 @@ export const SupplierManagement = () => {
                   onValueChange={(v) => {
                     setRowsPerPage(Number(v));
                     setCurrentPage(1);
-                    setTimeout(() => fetchSuppliers(), 0);
                   }}
                 >
                   <SelectTrigger className="w-16 h-7 text-xs">
@@ -541,8 +564,10 @@ export const SupplierManagement = () => {
                     variant="outline"
                     size="sm"
                     className="h-7 text-xs"
-                    onClick={() => setCurrentPage(1)}
-                    disabled={currentPage === 1}
+                    onClick={() => {
+                      setCurrentPage(1);
+                    }}
+                    disabled={currentPage === 1 || totalPages === 0}
                   >
                     First
                   </Button>
@@ -550,8 +575,10 @@ export const SupplierManagement = () => {
                     variant="outline"
                     size="sm"
                     className="h-7 text-xs"
-                    onClick={() => setCurrentPage(currentPage - 1)}
-                    disabled={currentPage === 1}
+                    onClick={() => {
+                      setCurrentPage(Math.max(1, currentPage - 1));
+                    }}
+                    disabled={currentPage === 1 || totalPages === 0}
                   >
                     Prev
                   </Button>
@@ -559,8 +586,10 @@ export const SupplierManagement = () => {
                     variant="outline"
                     size="sm"
                     className="h-7 text-xs"
-                    onClick={() => setCurrentPage(currentPage + 1)}
-                    disabled={currentPage === totalPages || totalPages === 0}
+                    onClick={() => {
+                      setCurrentPage(Math.min(totalPages, currentPage + 1));
+                    }}
+                    disabled={currentPage >= totalPages || totalPages === 0}
                   >
                     Next
                   </Button>
@@ -568,8 +597,10 @@ export const SupplierManagement = () => {
                     variant="outline"
                     size="sm"
                     className="h-7 text-xs"
-                    onClick={() => setCurrentPage(totalPages)}
-                    disabled={currentPage === totalPages || totalPages === 0}
+                    onClick={() => {
+                      setCurrentPage(totalPages);
+                    }}
+                    disabled={currentPage >= totalPages || totalPages === 0}
                   >
                     Last
                   </Button>

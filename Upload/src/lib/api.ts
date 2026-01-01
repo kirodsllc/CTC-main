@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+// Use environment variable or fallback to localhost for development, /api for production
+const API_BASE_URL = import.meta.env.VITE_API_URL || 
+  (import.meta.env.DEV ? 'http://localhost:3001/api' : '/api');
 
 interface ApiResponse<T> {
   data?: T;
@@ -31,15 +33,40 @@ class ApiClient {
         ...options,
       });
 
+      // Check if response is actually JSON before trying to parse
+      const contentType = response.headers.get('content-type');
+      const isJson = contentType && contentType.includes('application/json');
+
       if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: response.statusText }));
-        throw new Error(error.error || `HTTP error! status: ${response.status}`);
+        if (isJson) {
+          const error = await response.json().catch(() => ({ error: response.statusText }));
+          throw new Error(error.error || `HTTP error! status: ${response.status}`);
+        } else {
+          // If not JSON, it's probably an HTML error page
+          const text = await response.text();
+          throw new Error(`HTTP error! status: ${response.status}. Server returned HTML instead of JSON. This usually means the backend is not running or the API endpoint is incorrect.`);
+        }
+      }
+
+      if (!isJson) {
+        // If response is not JSON, it's probably an HTML page (404, etc.)
+        const text = await response.text();
+        if (text.trim().startsWith('<!')) {
+          throw new Error('Server returned HTML instead of JSON. The backend API may not be running or the endpoint is incorrect.');
+        }
+        throw new Error('Invalid response format: expected JSON but received ' + contentType);
       }
 
       const data = await response.json();
       return data;
     } catch (error: any) {
       console.error('API request failed:', error);
+      // Provide more helpful error messages
+      if (error.message && error.message.includes('HTML')) {
+        return { 
+          error: 'Backend API is not responding. Please ensure the backend server is running on port 3001.' 
+        };
+      }
       return { error: error.message || 'Network error occurred' };
     }
   }
@@ -955,7 +982,7 @@ class ApiClient {
       });
     }
     const queryString = queryParams.toString();
-    return this.request(`/financial/general-journal${queryString ? `?${queryString}` : ''}`);
+    return this.request(`/accounting/general-journal${queryString ? `?${queryString}` : ''}`);
   }
 
   async getTrialBalance(params?: {
@@ -1028,6 +1055,23 @@ class ApiClient {
 
   async getAccountGroups() {
     return this.request('/financial/account-groups');
+  }
+
+  async getAccounts(params?: {
+    subgroupId?: string;
+    status?: string;
+    mainGroupId?: string;
+  }) {
+    const queryParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          queryParams.append(key, String(value));
+        }
+      });
+    }
+    const queryString = queryParams.toString();
+    return this.request(`/accounting/accounts${queryString ? `?${queryString}` : ''}`);
   }
 
   // Customers API
@@ -1682,6 +1726,53 @@ class ApiClient {
     variables?: Record<string, string>;
   }) {
     return this.request('/whatsapp-settings/send-message', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // LongCat Settings API
+  async getLongCatSettings() {
+    return this.request('/longcat-settings');
+  }
+
+  async updateLongCatSettings(data: {
+    apiKey?: string;
+    model?: string;
+    baseUrl?: string;
+  }) {
+    return this.request('/longcat-settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async sendLongCatChat(data: {
+    messages: Array<{ role: string; content: string }>;
+    model?: string;
+    max_tokens?: number;
+    temperature?: number;
+    stream?: boolean;
+    enable_thinking?: boolean;
+    thinking_budget?: number;
+  }) {
+    return this.request('/longcat-settings/chat', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async sendLongCatMessage(data: {
+    messages: Array<{ role: string; content: string }>;
+    system?: string;
+    model?: string;
+    max_tokens?: number;
+    temperature?: number;
+    stream?: boolean;
+    enable_thinking?: boolean;
+    thinking_budget?: number;
+  }) {
+    return this.request('/longcat-settings/messages', {
       method: 'POST',
       body: JSON.stringify(data),
     });

@@ -21,6 +21,11 @@ async function importApplications() {
       const subcategoryName = item['sub catigory']?.trim();
       const applicationName = item.application?.trim();
       
+      // Skip only truly invalid application names (dot, dash, or empty)
+      if (applicationName && (applicationName === '.' || applicationName === '-' || applicationName === '')) {
+        continue; // Skip invalid applications
+      }
+      
       if (categoryName && subcategoryName && applicationName) {
         if (!applicationMap.has(categoryName)) {
           applicationMap.set(categoryName, new Map());

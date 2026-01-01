@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { apiClient } from "@/lib/api";
 import {
   Table,
   TableBody,
@@ -71,7 +72,6 @@ interface PriceStructure {
   notes: string;
 }
 
-const mockPriceStructures: PriceStructure[] = [];
 
 const priceCategories = [
   { value: "Price A (Retail)", label: "Price A (Retail)" },
@@ -107,9 +107,10 @@ const getTypeLabel = (type: CustomerType) => {
 };
 
 export const CustomerPriceStructures = () => {
-  const [priceStructures, setPriceStructures] = useState<PriceStructure[]>(mockPriceStructures);
+  const [priceStructures, setPriceStructures] = useState<PriceStructure[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
+  const [loading, setLoading] = useState(false);
   
   // Dialog states
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -142,6 +143,50 @@ export const CustomerPriceStructures = () => {
     creditDays: 30,
   });
 
+  // Fetch price structures from database/localStorage
+  useEffect(() => {
+    const fetchPriceStructures = async () => {
+      setLoading(true);
+      try {
+        // TODO: Replace with API call when endpoint is available
+        // const response = await apiClient.getCustomerPriceStructures();
+        // if (response.data) {
+        //   setPriceStructures(response.data);
+        // }
+        
+        // For now, use localStorage
+        const storedStructures = localStorage.getItem('customerPriceStructures');
+        if (storedStructures) {
+          setPriceStructures(JSON.parse(storedStructures));
+        }
+      } catch (error: any) {
+        console.error('Error fetching price structures:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load price structures",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPriceStructures();
+  }, []);
+
+  // Save price structures to localStorage (temporary until API is ready)
+  useEffect(() => {
+    if (priceStructures.length > 0) {
+      localStorage.setItem('customerPriceStructures', JSON.stringify(priceStructures));
+    } else {
+      // Clear localStorage if no structures
+      const stored = localStorage.getItem('customerPriceStructures');
+      if (stored && JSON.parse(stored).length === 0) {
+        localStorage.removeItem('customerPriceStructures');
+      }
+    }
+  }, [priceStructures]);
+
   // Stats
   const totalCount = priceStructures.length;
   const retailCount = priceStructures.filter(p => p.customerType === "retail").length;
@@ -172,11 +217,50 @@ export const CustomerPriceStructures = () => {
     });
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
+    if (!formData.customerName || formData.customerName.trim() === "") {
+      toast({
+        title: "Validation Error",
+        description: "Customer name is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check for duplicate customer
+    const duplicate = priceStructures.find(p => 
+      p.customerName.toLowerCase() === formData.customerName.toLowerCase().trim()
+    );
+    if (duplicate) {
+      toast({
+        title: "Duplicate Customer",
+        description: "A price structure already exists for this customer. Please edit the existing one.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const newStructure: PriceStructure = {
-      id: `PS${String(priceStructures.length + 1).padStart(3, "0")}`,
+      id: crypto.randomUUID(),
       ...formData,
+      customerName: formData.customerName.trim(),
     };
+
+    // TODO: Save to API when endpoint is available
+    // try {
+    //   const response = await apiClient.createCustomerPriceStructure(newStructure);
+    //   if (response.error) {
+    //     throw new Error(response.error);
+    //   }
+    // } catch (error: any) {
+    //   toast({
+    //     title: "Error",
+    //     description: error.message || "Failed to create price structure",
+    //     variant: "destructive",
+    //   });
+    //   return;
+    // }
+
     setPriceStructures([...priceStructures, newStructure]);
     setIsAddDialogOpen(false);
     resetForm();
@@ -205,12 +289,50 @@ export const CustomerPriceStructures = () => {
     setIsEditDialogOpen(true);
   };
 
-  const handleUpdate = () => {
+  const handleUpdate = async () => {
     if (!selectedStructure) return;
+    
+    if (!formData.customerName || formData.customerName.trim() === "") {
+      toast({
+        title: "Validation Error",
+        description: "Customer name is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check for duplicate customer (excluding current one)
+    const duplicate = priceStructures.find(p => 
+      p.id !== selectedStructure.id &&
+      p.customerName.toLowerCase() === formData.customerName.toLowerCase().trim()
+    );
+    if (duplicate) {
+      toast({
+        title: "Duplicate Customer",
+        description: "A price structure already exists for this customer name.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // TODO: Update via API when endpoint is available
+    // try {
+    //   const response = await apiClient.updateCustomerPriceStructure(selectedStructure.id, formData);
+    //   if (response.error) {
+    //     throw new Error(response.error);
+    //   }
+    // } catch (error: any) {
+    //   toast({
+    //     title: "Error",
+    //     description: error.message || "Failed to update price structure",
+    //     variant: "destructive",
+    //   });
+    //   return;
+    // }
     
     setPriceStructures(priceStructures.map(p => 
       p.id === selectedStructure.id 
-        ? { ...p, ...formData }
+        ? { ...p, ...formData, customerName: formData.customerName.trim() }
         : p
     ));
     setIsEditDialogOpen(false);
@@ -227,8 +349,23 @@ export const CustomerPriceStructures = () => {
     setIsDeleteDialogOpen(true);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!selectedStructure) return;
+    
+    // TODO: Delete via API when endpoint is available
+    // try {
+    //   const response = await apiClient.deleteCustomerPriceStructure(selectedStructure.id);
+    //   if (response.error) {
+    //     throw new Error(response.error);
+    //   }
+    // } catch (error: any) {
+    //   toast({
+    //     title: "Error",
+    //     description: error.message || "Failed to delete price structure",
+    //     variant: "destructive",
+    //   });
+    //   return;
+    // }
     
     setPriceStructures(priceStructures.filter((item) => item.id !== selectedStructure.id));
     setIsDeleteDialogOpen(false);
@@ -239,7 +376,38 @@ export const CustomerPriceStructures = () => {
     });
   };
 
-  const handleBulkUpdate = () => {
+  const handleBulkUpdate = async () => {
+    const affectedCount = priceStructures.filter(p => p.customerType === bulkForm.customerType).length;
+    
+    if (affectedCount === 0) {
+      toast({
+        title: "No Customers Found",
+        description: `No ${bulkForm.customerType} customers found to update.`,
+        variant: "default",
+      });
+      return;
+    }
+
+    // TODO: Bulk update via API when endpoint is available
+    // try {
+    //   const response = await apiClient.bulkUpdateCustomerPriceStructures({
+    //     customerType: bulkForm.customerType,
+    //     priceCategory: bulkForm.priceCategory,
+    //     standardDiscount: bulkForm.discount,
+    //     creditDays: bulkForm.creditDays,
+    //   });
+    //   if (response.error) {
+    //     throw new Error(response.error);
+    //   }
+    // } catch (error: any) {
+    //   toast({
+    //     title: "Error",
+    //     description: error.message || "Failed to bulk update price structures",
+    //     variant: "destructive",
+    //   });
+    //   return;
+    // }
+
     setPriceStructures(priceStructures.map(p => {
       if (p.customerType === bulkForm.customerType) {
         return {
@@ -252,44 +420,98 @@ export const CustomerPriceStructures = () => {
       return p;
     }));
     setIsBulkUpdateOpen(false);
+    setBulkForm({
+      customerType: "retail",
+      priceCategory: "Price A (Retail)",
+      discount: 0,
+      creditDays: 30,
+    });
     toast({
       title: "Bulk Update Complete",
-      description: `All ${bulkForm.customerType} customers have been updated.`,
+      description: `${affectedCount} ${bulkForm.customerType} customer${affectedCount !== 1 ? 's' : ''} have been updated.`,
     });
   };
 
   const handleExport = () => {
-    const csvContent = [
-      ["Customer", "Type", "Price Category", "Discount %", "Credit Limit", "Credit Days", "Min Order", "Status"].join(","),
-      ...filteredStructures.map(p => [
-        p.customerName,
-        p.customerType,
-        p.priceCategory,
-        `${p.standardDiscount}${p.specialDiscount > 0 ? `+${p.specialDiscount}` : ''}`,
-        p.creditLimit,
-        p.creditDays,
-        p.minOrderValue,
-        p.status
-      ].join(","))
-    ].join("\n");
+    if (filteredStructures.length === 0) {
+      toast({
+        title: "No Data to Export",
+        description: "There are no price structures to export. Please add some price structures first.",
+        variant: "default",
+      });
+      return;
+    }
 
-    const blob = new Blob([csvContent], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "price-structures.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      // Escape CSV values that contain commas or quotes
+      const escapeCSV = (value: any): string => {
+        const str = String(value);
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      };
 
-    toast({
-      title: "Export Complete",
-      description: "Price structures have been exported to CSV.",
-    });
+      const csvContent = [
+        ["Customer", "Type", "Price Category", "Discount %", "Credit Limit", "Credit Days", "Min Order", "Status", "Effective From", "Effective To"].join(","),
+        ...filteredStructures.map(p => [
+          escapeCSV(p.customerName),
+          escapeCSV(p.customerType),
+          escapeCSV(p.priceCategory),
+          escapeCSV(`${p.standardDiscount}${p.specialDiscount > 0 ? `+${p.specialDiscount}` : ''}`),
+          escapeCSV(p.creditLimit),
+          escapeCSV(p.creditDays),
+          escapeCSV(p.minOrderValue),
+          escapeCSV(p.status),
+          escapeCSV(p.effectiveFrom),
+          escapeCSV(p.effectiveTo || 'N/A')
+        ].join(","))
+      ].join("\n");
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const dateStr = new Date().toISOString().split('T')[0];
+      a.download = `price-structures-${dateStr}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast({
+        title: "Export Complete",
+        description: `${filteredStructures.length} price structure${filteredStructures.length !== 1 ? 's' : ''} exported to CSV.`,
+      });
+    } catch (error: any) {
+      console.error('Export error:', error);
+      toast({
+        title: "Export Error",
+        description: error.message || "Failed to export price structures",
+        variant: "destructive",
+      });
+    }
   };
 
   const handlePrint = () => {
+    if (filteredStructures.length === 0) {
+      toast({
+        title: "No Data to Print",
+        description: "There are no price structures to print. Please add some price structures first.",
+        variant: "default",
+      });
+      return;
+    }
+
     const printWindow = window.open("", "_blank");
-    if (!printWindow) return;
+    if (!printWindow) {
+      toast({
+        title: "Print Error",
+        description: "Unable to open print window. Please check your browser settings.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const html = `
       <!DOCTYPE html>
@@ -356,7 +578,15 @@ export const CustomerPriceStructures = () => {
 
     printWindow.document.write(html);
     printWindow.document.close();
-    printWindow.print();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 250);
+    
+    toast({
+      title: "Print Initiated",
+      description: "Price structures report sent to printer.",
+    });
   };
 
   return (
@@ -504,10 +734,18 @@ export const CustomerPriceStructures = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredStructures.length === 0 ? (
+                {loading ? (
                   <TableRow>
                     <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
-                      No price structures found
+                      Loading price structures...
+                    </TableCell>
+                  </TableRow>
+                ) : filteredStructures.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                      {searchTerm || filterType !== "all"
+                        ? "No price structures found matching your search criteria"
+                        : "No price structures found. Click 'Add Price Structure' to create one."}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -712,7 +950,13 @@ export const CustomerPriceStructures = () => {
               <Button onClick={handleCreate} disabled={!formData.customerName}>
                 Create Price Structure
               </Button>
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setIsAddDialogOpen(false);
+                  resetForm();
+                }}
+              >
                 Cancel
               </Button>
             </div>
@@ -869,7 +1113,14 @@ export const CustomerPriceStructures = () => {
               <Button onClick={handleUpdate} disabled={!formData.customerName}>
                 Update Price Structure
               </Button>
-              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setIsEditDialogOpen(false);
+                  setSelectedStructure(null);
+                  resetForm();
+                }}
+              >
                 Cancel
               </Button>
             </div>

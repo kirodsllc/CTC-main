@@ -616,6 +616,15 @@ model WhatsAppSettings {
   updatedAt               DateTime @updatedAt
 }
 
+model LongCatSettings {
+  id        String   @id @default(uuid())
+  apiKey    String?
+  model     String?  @default("LongCat-Flash-Chat")
+  baseUrl   String?  @default("https://api.longcat.chat")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Kit {
   id          String    @id @default(uuid())
   badge       String    @unique

@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { apiClient } from "@/lib/api";
 import {
   Table,
   TableBody,
@@ -78,21 +79,15 @@ interface DeliveryChallanType {
   deliveryNotes: string;
 }
 
-// Saved parts data (this would come from your parts module)
-const mockSavedParts: { partNo: string; description: string; model: string; category: string }[] = [
-  { partNo: "TEST001", description: "High quality brake pad for vehicles", model: "Universal", category: "Brakes" },
-  { partNo: "TEST002", description: "Premium air filter element", model: "Universal", category: "Filters" },
-  { partNo: "ENG-001", description: "Engine oil filter for diesel engines", model: "Universal", category: "Engine" },
-  { partNo: "SUS-001", description: "Suspension shock absorber front", model: "Universal", category: "Suspension" },
-];
-
-const mockChallans: DeliveryChallanType[] = [];
 
 export const DeliveryChallan = () => {
-  const [challans, setChallans] = useState<DeliveryChallanType[]>(mockChallans);
+  const [challans, setChallans] = useState<DeliveryChallanType[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [viewMode, setViewMode] = useState<"list" | "card">("list");
+  const [loadingChallans, setLoadingChallans] = useState(false);
+  const [loadingParts, setLoadingParts] = useState(false);
+  const [availableParts, setAvailableParts] = useState<{ partNo: string; description: string; id: string }[]>([]);
 
   // Dialog states
   const [isNewChallanOpen, setIsNewChallanOpen] = useState(false);
@@ -100,9 +95,16 @@ export const DeliveryChallan = () => {
   const [isDeliverOpen, setIsDeliverOpen] = useState(false);
   const [selectedChallan, setSelectedChallan] = useState<DeliveryChallanType | null>(null);
 
+  // Generate challan number
+  const generateChallanNo = () => {
+    const year = new Date().getFullYear();
+    const nextNum = challans.length + 1;
+    return `DC-${year}-${String(nextNum).padStart(3, "0")}`;
+  };
+
   // New challan form
   const [newChallanForm, setNewChallanForm] = useState({
-    challanNo: `DC-2025-${String(challans.length + 1).padStart(3, "0")}`,
+    challanNo: generateChallanNo(),
     deliveryDate: new Date().toISOString().split("T")[0],
     status: "draft",
     customerName: "",
@@ -134,6 +136,85 @@ export const DeliveryChallan = () => {
     deliveryNotes: "",
   });
   const [deliveredItems, setDeliveredItems] = useState<{ partNo: string; deliveredQty: number; remarks: string }[]>([]);
+
+  // Fetch challans from database
+  useEffect(() => {
+    const fetchChallans = async () => {
+      setLoadingChallans(true);
+      try {
+        // Note: This assumes there's an API endpoint for delivery challans
+        // If not available, we'll create a local storage solution for now
+        // For now, we'll keep the state-based approach but make it ready for API integration
+        const storedChallans = localStorage.getItem('deliveryChallans');
+        if (storedChallans) {
+          setChallans(JSON.parse(storedChallans));
+        }
+      } catch (error: any) {
+        console.error('Error fetching challans:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load delivery challans",
+          variant: "destructive",
+        });
+      } finally {
+        setLoadingChallans(false);
+      }
+    };
+
+    fetchChallans();
+  }, []);
+
+  // Fetch parts from database
+  useEffect(() => {
+    const fetchParts = async () => {
+      setLoadingParts(true);
+      try {
+        const response = await apiClient.getParts({ 
+          status: 'active',
+          limit: 1000,
+          page: 1 
+        });
+
+        if (response.error) {
+          console.error('Error fetching parts:', response.error);
+          return;
+        }
+
+        let partsDataArray: any[] = [];
+        if (Array.isArray(response)) {
+          partsDataArray = response;
+        } else if (response.data && Array.isArray(response.data)) {
+          partsDataArray = response.data;
+        } else if (response.pagination && response.data) {
+          partsDataArray = response.data;
+        }
+
+        const transformedParts = partsDataArray
+          .filter((p: any) => p.status === 'active' || !p.status)
+          .map((p: any) => ({
+            id: p.id,
+            partNo: String(p.part_no || p.partNo || '').trim(),
+            description: String(p.description || p.part_no || '').trim() || 'No description',
+          }))
+          .filter((p: any) => p.partNo && p.partNo.trim() !== '');
+
+        setAvailableParts(transformedParts);
+      } catch (error: any) {
+        console.error('Error fetching parts:', error);
+      } finally {
+        setLoadingParts(false);
+      }
+    };
+
+    fetchParts();
+  }, []);
+
+  // Save challans to localStorage (temporary until API is ready)
+  useEffect(() => {
+    if (challans.length > 0) {
+      localStorage.setItem('deliveryChallans', JSON.stringify(challans));
+    }
+  }, [challans]);
 
   const filteredChallans = challans.filter((item) => {
     const matchesSearch =
@@ -169,18 +250,27 @@ export const DeliveryChallan = () => {
     );
   };
 
-  const handleCreateChallan = () => {
+  const handleCreateChallan = async () => {
     if (!newChallanForm.customerName || !newChallanForm.deliveryAddress) {
       toast({
-        title: "Error",
-        description: "Please fill in required fields.",
+        title: "Validation Error",
+        description: "Please fill in required fields (Customer Name and Delivery Address).",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (challanItems.length === 0) {
+      toast({
+        title: "Validation Error",
+        description: "Please add at least one item to the challan.",
         variant: "destructive",
       });
       return;
     }
 
     const newChallan: DeliveryChallanType = {
-      id: String(challans.length + 1),
+      id: crypto.randomUUID(),
       challanNo: newChallanForm.challanNo,
       orderNo: `SO-2025-${String(challans.length + 1).padStart(3, "0")}`,
       customerName: newChallanForm.customerName,
@@ -190,7 +280,7 @@ export const DeliveryChallan = () => {
       createdDate: new Date().toISOString().split("T")[0],
       dispatchedDate: null,
       deliveredDate: null,
-      totalPackages: newChallanForm.totalPackages,
+      totalPackages: newChallanForm.totalPackages || challanItems.length,
       totalWeight: newChallanForm.totalWeight,
       items: challanItems,
       notes: newChallanForm.notes,
@@ -206,18 +296,33 @@ export const DeliveryChallan = () => {
       deliveryNotes: "",
     };
 
+    // TODO: Save to API when endpoint is available
+    // try {
+    //   const response = await apiClient.createDeliveryChallan(newChallan);
+    //   if (response.error) {
+    //     throw new Error(response.error);
+    //   }
+    // } catch (error: any) {
+    //   toast({
+    //     title: "Error",
+    //     description: error.message || "Failed to create challan",
+    //     variant: "destructive",
+    //   });
+    //   return;
+    // }
+
     setChallans([newChallan, ...challans]);
     setIsNewChallanOpen(false);
     resetNewChallanForm();
     toast({
       title: "Challan Created",
-      description: `Delivery Challan ${newChallan.challanNo} has been created.`,
+      description: `Delivery Challan ${newChallan.challanNo} has been created successfully.`,
     });
   };
 
   const resetNewChallanForm = () => {
     setNewChallanForm({
-      challanNo: `DC-2025-${String(challans.length + 2).padStart(3, "0")}`,
+      challanNo: generateChallanNo(),
       deliveryDate: new Date().toISOString().split("T")[0],
       status: "draft",
       customerName: "",
@@ -559,7 +664,13 @@ export const DeliveryChallan = () => {
               <LayoutGrid className="w-4 h-4" />
             </Button>
           </div>
-          <Button onClick={() => setIsNewChallanOpen(true)} className="gap-2 bg-primary text-primary-foreground h-9">
+          <Button 
+            onClick={() => {
+              resetNewChallanForm();
+              setIsNewChallanOpen(true);
+            }} 
+            className="gap-2 bg-primary text-primary-foreground h-9"
+          >
             <Plus className="w-4 h-4" />
             New Challan
           </Button>
@@ -572,7 +683,15 @@ export const DeliveryChallan = () => {
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-bold text-foreground">New Delivery Challan</h3>
-              <Button variant="ghost" size="icon" onClick={() => setIsNewChallanOpen(false)} className="h-8 w-8">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => {
+                  setIsNewChallanOpen(false);
+                  resetNewChallanForm();
+                }} 
+                className="h-8 w-8"
+              >
                 <X className="w-4 h-4" />
               </Button>
             </div>
@@ -687,25 +806,32 @@ export const DeliveryChallan = () => {
                               <Select
                                 value={item.partNo}
                                 onValueChange={(value) => {
-                                  const selectedPart = mockSavedParts.find(p => p.partNo === value);
+                                  const selectedPart = availableParts.find(p => p.partNo === value);
                                   handleItemChange(item.id, "partNo", value);
                                   if (selectedPart) {
                                     handleItemChange(item.id, "description", selectedPart.description);
                                   }
                                 }}
+                                disabled={loadingParts}
                               >
                                 <SelectTrigger className="h-8 text-xs w-32 bg-background">
-                                  <SelectValue placeholder="Select Part" />
+                                  <SelectValue placeholder={loadingParts ? "Loading..." : "Select Part"} />
                                 </SelectTrigger>
-                                <SelectContent className="bg-popover z-50">
-                                  {mockSavedParts.map((part) => (
-                                    <SelectItem key={part.partNo} value={part.partNo} className="text-xs">
-                                      <div className="flex flex-col">
-                                        <span className="font-medium">{part.partNo}</span>
-                                        <span className="text-muted-foreground text-[10px]">{part.description}</span>
-                                      </div>
-                                    </SelectItem>
-                                  ))}
+                                <SelectContent className="bg-popover z-50 max-h-60">
+                                  {availableParts.length === 0 ? (
+                                    <div className="px-2 py-1.5 text-xs text-muted-foreground text-center">
+                                      {loadingParts ? "Loading parts..." : "No parts available"}
+                                    </div>
+                                  ) : (
+                                    availableParts.map((part) => (
+                                      <SelectItem key={part.id} value={part.partNo} className="text-xs">
+                                        <div className="flex flex-col">
+                                          <span className="font-medium">{part.partNo}</span>
+                                          <span className="text-muted-foreground text-[10px] line-clamp-1">{part.description}</span>
+                                        </div>
+                                      </SelectItem>
+                                    ))
+                                  )}
                                 </SelectContent>
                               </Select>
                             </TableCell>
@@ -765,7 +891,13 @@ export const DeliveryChallan = () => {
                 <Button onClick={handleCreateChallan} className="bg-primary text-primary-foreground">
                   Create Challan
                 </Button>
-                <Button variant="outline" onClick={() => setIsNewChallanOpen(false)}>
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    setIsNewChallanOpen(false);
+                    resetNewChallanForm();
+                  }}
+                >
                   Cancel
                 </Button>
               </div>
@@ -794,7 +926,14 @@ export const DeliveryChallan = () => {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredChallans.map((challan) => (
+                      {filteredChallans.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                            {loadingChallans ? "Loading challans..." : "No delivery challans found. Create a new challan to get started."}
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredChallans.map((challan) => (
                         <TableRow key={challan.id}>
                           <TableCell>
                             <div>
@@ -855,7 +994,8 @@ export const DeliveryChallan = () => {
                             </div>
                           </TableCell>
                         </TableRow>
-                      ))}
+                      ))
+                      )}
                     </TableBody>
                   </Table>
                 </div>
@@ -863,7 +1003,17 @@ export const DeliveryChallan = () => {
             </Card>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredChallans.map((challan) => (
+              {filteredChallans.length === 0 ? (
+                <Card className="col-span-full">
+                  <CardContent className="p-8 text-center">
+                    <Package className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                    <p className="text-muted-foreground">
+                      {loadingChallans ? "Loading challans..." : "No delivery challans found. Create a new challan to get started."}
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                filteredChallans.map((challan) => (
                 <Card key={challan.id} className="shadow-sm">
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between mb-4">
@@ -933,7 +1083,8 @@ export const DeliveryChallan = () => {
                     </div>
                   </CardContent>
                 </Card>
-              ))}
+              ))
+              )}
             </div>
           )}
         </>

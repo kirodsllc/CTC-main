@@ -601,7 +601,7 @@ export const PartEntryForm = ({ onSave, selectedPart, onClearSelection }: PartEn
       </div>
 
       {/* Right Panel - Model and Quantity */}
-      <div className="w-56 bg-card rounded-lg border border-border p-3">
+      <div className="w-72 bg-card rounded-lg border border-border p-3">
         <div className="flex items-start justify-between mb-3">
           <div>
             <div className="flex items-center gap-1.5">
@@ -617,30 +617,30 @@ export const PartEntryForm = ({ onSave, selectedPart, onClearSelection }: PartEn
         </div>
 
         <div className="border-t border-border pt-3">
-          <div className="grid grid-cols-3 gap-1.5 mb-2 text-xs text-muted-foreground">
+          <div className="grid grid-cols-[2fr_1.5fr_0.8fr] gap-2 mb-2 text-xs text-muted-foreground">
             <span>Model</span>
             <span>Qty. Used</span>
-            <span>Action</span>
+            <span className="text-center">Action</span>
           </div>
 
           {modelQuantities.map((mq) => (
-            <div key={mq.id} className="grid grid-cols-3 gap-1.5 mb-1.5 items-center">
+            <div key={mq.id} className="grid grid-cols-[2fr_1.5fr_0.8fr] gap-2 mb-1.5 items-center">
               <Input
-                placeholder="Enter mc"
+                placeholder="Enter model"
                 value={mq.model}
                 onChange={(e) => handleModelChange(mq.id, "model", e.target.value)}
-                className="h-7 text-xs"
+                className="h-8 text-sm"
               />
               <Input
                 type="number"
                 value={mq.qty || ""}
                 onChange={(e) => handleModelChange(mq.id, "qty", parseInt(e.target.value) || 0)}
-                className="h-7 text-xs"
+                className="h-8 text-sm"
               />
               <Button
                 variant="outline"
                 size="icon"
-                className="h-7 w-7 text-destructive border-destructive hover:bg-destructive hover:text-destructive-foreground"
+                className="h-8 w-8 text-destructive border-destructive hover:bg-destructive hover:text-destructive-foreground mx-auto"
                 onClick={() => handleRemoveModel(mq.id)}
               >
                 ✕

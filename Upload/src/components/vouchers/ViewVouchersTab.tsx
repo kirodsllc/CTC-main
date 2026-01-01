@@ -393,28 +393,51 @@ export const ViewVouchersTab = ({
       if (categoryFilter === "income" && voucher.type !== "receipt") return false;
     }
     
+    // Helper to parse date safely
+    const parseDate = (dateString: string): Date | null => {
+      if (!dateString) return null;
+      try {
+        // Handle ISO format (YYYY-MM-DD)
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+          return new Date(dateString + 'T00:00:00');
+        }
+        // Handle DD/MM/YYYY format
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateString)) {
+          const [day, month, year] = dateString.split('/');
+          return new Date(`${year}-${month}-${day}T00:00:00`);
+        }
+        // Try standard date parsing
+        const date = new Date(dateString);
+        return isNaN(date.getTime()) ? null : date;
+      } catch {
+        return null;
+      }
+    };
+
     // Post dated filter (check if voucher date is in the future)
     if (postDatedFilter !== "default") {
-      const voucherDate = new Date(voucher.date);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const isPostDated = voucherDate > today;
-      if (postDatedFilter === "yes" && !isPostDated) return false;
-      if (postDatedFilter === "no" && isPostDated) return false;
+      const voucherDate = parseDate(voucher.date);
+      if (voucherDate) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const isPostDated = voucherDate > today;
+        if (postDatedFilter === "yes" && !isPostDated) return false;
+        if (postDatedFilter === "no" && isPostDated) return false;
+      }
     }
     
     // Date range filter
     if (fromDate) {
       const from = new Date(fromDate);
       from.setHours(0, 0, 0, 0);
-      const voucherDate = new Date(voucher.date);
-      if (voucherDate < from) return false;
+      const voucherDate = parseDate(voucher.date);
+      if (voucherDate && voucherDate < from) return false;
     }
     if (toDate) {
       const to = new Date(toDate);
       to.setHours(23, 59, 59, 999);
-      const voucherDate = new Date(voucher.date);
-      if (voucherDate > to) return false;
+      const voucherDate = parseDate(voucher.date);
+      if (voucherDate && voucherDate > to) return false;
     }
     
     // Main Group filter (check if any entry account matches main group)
@@ -477,29 +500,92 @@ export const ViewVouchersTab = ({
     }
     setEditingVoucher(voucher);
     setEditNarration(voucher.narration);
-    setEditDate(voucher.date);
+    // Convert date to YYYY-MM-DD format for date input
+    let editDateValue = voucher.date;
+    if (voucher.date) {
+      try {
+        // Handle DD/MM/YYYY format
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(voucher.date)) {
+          const [day, month, year] = voucher.date.split('/');
+          editDateValue = `${year}-${month}-${day}`;
+        } else if (/^\d{4}-\d{2}-\d{2}$/.test(voucher.date)) {
+          editDateValue = voucher.date;
+        } else {
+          const date = new Date(voucher.date);
+          if (!isNaN(date.getTime())) {
+            editDateValue = date.toISOString().split('T')[0];
+          }
+        }
+      } catch {
+        // Keep original if conversion fails
+      }
+    }
+    setEditDate(editDateValue);
     setEditEntries([...voucher.entries]);
   };
 
   const handleSaveEdit = () => {
     if (!editingVoucher) return;
     
-    const totalDebit = editEntries.reduce((sum, e) => sum + e.debit, 0);
-    const totalCredit = editEntries.reduce((sum, e) => sum + e.credit, 0);
-    
-    if (totalDebit !== totalCredit) {
+    // Validate entries
+    if (editEntries.length === 0) {
       toast({
         title: "Validation Error",
-        description: "Total Debit must equal Total Credit",
+        description: "Please add at least one entry",
         variant: "destructive",
       });
       return;
     }
     
+    if (editEntries.some(e => !e.account)) {
+      toast({
+        title: "Validation Error",
+        description: "Please select account for all entries",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    const totalDebit = editEntries.reduce((sum, e) => sum + (Number(e.debit) || 0), 0);
+    const totalCredit = editEntries.reduce((sum, e) => sum + (Number(e.credit) || 0), 0);
+    
+    if (totalDebit === 0 && totalCredit === 0) {
+      toast({
+        title: "Validation Error",
+        description: "Please enter at least one amount",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (totalDebit !== totalCredit) {
+      toast({
+        title: "Validation Error",
+        description: `Total Debit (${formatAmount(totalDebit)}) must equal Total Credit (${formatAmount(totalCredit)})`,
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Ensure date is in ISO format
+    let finalDate = editDate;
+    if (editDate && /^\d{4}-\d{2}-\d{2}$/.test(editDate)) {
+      finalDate = editDate;
+    } else if (editDate) {
+      try {
+        const date = new Date(editDate);
+        if (!isNaN(date.getTime())) {
+          finalDate = date.toISOString().split('T')[0];
+        }
+      } catch {
+        // Keep original if conversion fails
+      }
+    }
+    
     onUpdateVoucher({
       ...editingVoucher,
       narration: editNarration,
-      date: editDate,
+      date: finalDate,
       entries: editEntries,
       totalDebit,
       totalCredit,
@@ -589,6 +675,45 @@ export const ViewVouchersTab = ({
 
   const totalDebit = editEntries.reduce((sum, e) => sum + e.debit, 0);
   const totalCredit = editEntries.reduce((sum, e) => sum + e.credit, 0);
+
+  // Helper function to get account label from account value
+  const getAccountLabel = (accountValue: string): string => {
+    if (!accountValue) return "-";
+    const account = accounts.find(acc => acc.value === accountValue);
+    return account ? account.label : accountValue;
+  };
+
+  // Helper function to format date safely
+  const formatDisplayDate = (dateString: string): string => {
+    if (!dateString) return "-";
+    try {
+      // Handle ISO format (YYYY-MM-DD)
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        const [year, month, day] = dateString.split('-');
+        return `${day}/${month}/${year}`;
+      }
+      // Handle DD/MM/YYYY format
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateString)) {
+        return dateString;
+      }
+      // Try parsing as date
+      const date = new Date(dateString);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleDateString("en-GB");
+      }
+      return dateString;
+    } catch {
+      return dateString;
+    }
+  };
+
+  // Helper function to format amount with proper decimals
+  const formatAmount = (amount: number): string => {
+    return amount.toLocaleString("en-PK", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -833,8 +958,8 @@ export const ViewVouchersTab = ({
                       {voucher.voucherNumber}
                     </TableCell>
                     <TableCell className="text-primary">{voucher.narration || "-"}</TableCell>
-                    <TableCell>{new Date(voucher.date).toLocaleDateString("en-GB")}</TableCell>
-                    <TableCell>{voucher.totalDebit.toLocaleString()}</TableCell>
+                    <TableCell>{formatDisplayDate(voucher.date)}</TableCell>
+                    <TableCell className="font-medium">{formatAmount(voucher.totalDebit)}</TableCell>
                     <TableCell>{getStatusBadge(voucher.status)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -908,20 +1033,59 @@ export const ViewVouchersTab = ({
             >
               ‹
             </Button>
-            {Array.from({ length: Math.min(5, totalPages || 1) }, (_, i) => {
-              const page = i + 1;
-              return (
-                <Button
-                  key={page}
-                  variant={currentPage === page ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setCurrentPage(page)}
-                >
-                  {page}
-                </Button>
-              );
-            })}
-            {totalPages > 5 && <span className="px-2">...</span>}
+            {(() => {
+              const pages: (number | string)[] = [];
+              const maxVisible = 5;
+              
+              if (totalPages <= maxVisible) {
+                // Show all pages if total is less than max visible
+                for (let i = 1; i <= totalPages; i++) {
+                  pages.push(i);
+                }
+              } else {
+                // Show first page
+                pages.push(1);
+                
+                if (currentPage > 3) {
+                  pages.push('...');
+                }
+                
+                // Show pages around current page
+                const start = Math.max(2, currentPage - 1);
+                const end = Math.min(totalPages - 1, currentPage + 1);
+                
+                for (let i = start; i <= end; i++) {
+                  if (i !== 1 && i !== totalPages) {
+                    pages.push(i);
+                  }
+                }
+                
+                if (currentPage < totalPages - 2) {
+                  pages.push('...');
+                }
+                
+                // Show last page
+                if (totalPages > 1) {
+                  pages.push(totalPages);
+                }
+              }
+              
+              return pages.map((page, idx) => {
+                if (page === '...') {
+                  return <span key={`ellipsis-${idx}`} className="px-2">...</span>;
+                }
+                return (
+                  <Button
+                    key={page}
+                    variant={currentPage === page ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setCurrentPage(page as number)}
+                  >
+                    {page}
+                  </Button>
+                );
+              });
+            })()}
             <Button
               variant="outline"
               size="sm"
@@ -1092,18 +1256,31 @@ export const ViewVouchersTab = ({
                 <div className="col-span-7 text-right font-semibold">Total Amount</div>
                 <div className="col-span-2">
                   <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Total Amount</Label>
-                    <Input value={totalDebit} readOnly className="bg-muted" />
+                    <Label className="text-xs text-muted-foreground">Total Debit</Label>
+                    <Input 
+                      value={formatAmount(totalDebit)} 
+                      readOnly 
+                      className="bg-muted font-medium" 
+                    />
                   </div>
                 </div>
                 <div className="col-span-2">
                   <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Total Amount</Label>
-                    <Input value={totalCredit} readOnly className="bg-muted" />
+                    <Label className="text-xs text-muted-foreground">Total Credit</Label>
+                    <Input 
+                      value={formatAmount(totalCredit)} 
+                      readOnly 
+                      className="bg-muted font-medium" 
+                    />
                   </div>
                 </div>
                 <div className="col-span-1"></div>
               </div>
+              {totalDebit !== totalCredit && (
+                <div className="text-sm text-destructive text-center pt-2">
+                  ⚠️ Total Debit ({formatAmount(totalDebit)}) must equal Total Credit ({formatAmount(totalCredit)})
+                </div>
+              )}
 
               {/* Add Buttons */}
               <div className="flex justify-center gap-4 pt-4">

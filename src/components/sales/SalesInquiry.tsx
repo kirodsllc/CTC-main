@@ -30,11 +30,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Plus, Search, Eye, FileText, CalendarIcon, Package, ShoppingCart, Boxes, Settings2, Truck, Printer } from "lucide-react";
+import { Plus, Search, Eye, FileText, CalendarIcon, Package, ShoppingCart, Boxes, Settings2, Truck, Printer, RefreshCw } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { PrintableDocument, printDocument } from "./PrintableDocument";
+import { apiClient } from "@/lib/api";
 
 interface Inquiry {
   id: string;
@@ -49,6 +50,7 @@ interface Inquiry {
 }
 
 interface PartDetail {
+  id?: string; // Part ID for fetching full details
   partNo: string;
   masterPart: string;
   brand: string;
@@ -69,89 +71,6 @@ interface PartDetail {
   reOrderLevel: string;
 }
 
-// Mock parts data for lookup
-const mockPartsData: PartDetail[] = [
-  {
-    partNo: "TEST001",
-    masterPart: "MP-001",
-    brand: "Test Brand",
-    description: "High quality brake pad for vehicles",
-    category: "Brakes",
-    subCategory: "Brake Pads",
-    uom: "NOS",
-    hsCode: "8708.30",
-    weight: "0.5",
-    cost: "100.50",
-    priceA: "150.00",
-    priceB: "140.00",
-    priceM: "130.00",
-    origin: "Japan",
-    grade: "A",
-    status: "A",
-    rackNo: "R-101",
-    reOrderLevel: "10",
-  },
-  {
-    partNo: "TEST002",
-    masterPart: "MP-001",
-    brand: "Test Brand 2",
-    description: "Premium air filter element",
-    category: "Filters",
-    subCategory: "Air Filter",
-    uom: "NOS",
-    hsCode: "8421.31",
-    weight: "0.3",
-    cost: "200.75",
-    priceA: "250.00",
-    priceB: "240.00",
-    priceM: "230.00",
-    origin: "Germany",
-    grade: "A",
-    status: "A",
-    rackNo: "R-102",
-    reOrderLevel: "15",
-  },
-  {
-    partNo: "ENG-001",
-    masterPart: "MP-002",
-    brand: "Bosch",
-    description: "Engine oil filter for diesel engines",
-    category: "Engine",
-    subCategory: "Oil Filter",
-    uom: "NOS",
-    hsCode: "8421.23",
-    weight: "0.4",
-    cost: "85.00",
-    priceA: "120.00",
-    priceB: "110.00",
-    priceM: "100.00",
-    origin: "USA",
-    grade: "A",
-    status: "A",
-    rackNo: "R-103",
-    reOrderLevel: "20",
-  },
-  {
-    partNo: "SUS-001",
-    masterPart: "MP-003",
-    brand: "Michelin",
-    description: "Suspension shock absorber front",
-    category: "Suspension",
-    subCategory: "Shock Absorber",
-    uom: "SET",
-    hsCode: "8708.80",
-    weight: "2.5",
-    cost: "320.00",
-    priceA: "400.00",
-    priceB: "380.00",
-    priceM: "360.00",
-    origin: "France",
-    grade: "B",
-    status: "A",
-    rackNo: "R-104",
-    reOrderLevel: "5",
-  },
-];
 
 export const SalesInquiry = () => {
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
@@ -178,37 +97,157 @@ export const SalesInquiry = () => {
   const [selectedPart, setSelectedPart] = useState<PartDetail | null>(null);
   const [showMasterDropdown, setShowMasterDropdown] = useState(false);
   const [showPartDropdown, setShowPartDropdown] = useState(false);
+  const [partsData, setPartsData] = useState<PartDetail[]>([]);
+  const [loadingParts, setLoadingParts] = useState(false);
+  const [loadingPartDetails, setLoadingPartDetails] = useState(false);
+  const [rackMap, setRackMap] = useState<Record<string, string>>({});
+  const [partIdMap, setPartIdMap] = useState<Record<string, string>>({}); // Map partNo to part ID
 
   const masterDropdownRef = useRef<HTMLDivElement>(null);
   const partDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Get unique master part numbers
+  // Fetch parts from database
+  useEffect(() => {
+    const fetchParts = async () => {
+      setLoadingParts(true);
+      try {
+        const [partsResponse, balancesResponse] = await Promise.all([
+          apiClient.getParts({ 
+            status: 'active',
+            limit: 10000,
+            page: 1 
+          }),
+          apiClient.getStockBalances({ limit: 10000 }).catch(() => ({ data: [], error: null }))
+        ]);
+
+        if (partsResponse.error) {
+          console.error('Error fetching parts:', partsResponse.error);
+          toast({
+            title: "Error",
+            description: "Failed to load parts from database",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        let partsDataArray: any[] = [];
+        if (Array.isArray(partsResponse)) {
+          partsDataArray = partsResponse;
+        } else if (partsResponse.data && Array.isArray(partsResponse.data)) {
+          partsDataArray = partsResponse.data;
+        } else if (partsResponse.pagination && partsResponse.data) {
+          partsDataArray = partsResponse.data;
+        }
+
+        let balancesData: any[] = [];
+        if (Array.isArray(balancesResponse)) {
+          balancesData = balancesResponse;
+        } else if (balancesResponse.data && Array.isArray(balancesResponse.data)) {
+          balancesData = balancesResponse.data;
+        }
+
+        // Create rack map from stock balances
+        const rackMapData: Record<string, string> = {};
+        if (Array.isArray(balancesData)) {
+          balancesData.forEach((b: any) => {
+            if (b.part_id && b.rack_no) {
+              rackMapData[b.part_id] = b.rack_no;
+            }
+          });
+        }
+        setRackMap(rackMapData);
+
+        // Create part ID map
+        const idMap: Record<string, string> = {};
+        
+        // Transform API data to PartDetail format
+        const transformedParts: PartDetail[] = partsDataArray
+          .filter((p: any) => p.status === 'active' || !p.status)
+          .map((p: any) => {
+            const partNo = String(p.part_no || p.partNo || '').trim();
+            if (partNo && p.id) {
+              idMap[partNo] = p.id;
+            }
+            
+            // Format numbers properly
+            const formatNumber = (val: any): string => {
+              if (val === null || val === undefined || val === '') return '0';
+              const num = parseFloat(val);
+              if (isNaN(num)) return '0';
+              // Remove unnecessary decimals if whole number
+              return num % 1 === 0 ? String(num) : num.toFixed(2);
+            };
+            
+            return {
+              id: p.id,
+              partNo: partNo,
+              masterPart: String(p.master_part_no || p.masterPart || p.master_part_no || '').trim() || 'N/A',
+              brand: String(p.brand_name || p.brand || '').trim() || 'N/A',
+              description: String(p.description || p.part_no || '').trim() || 'No description',
+              category: String(p.category_name || p.category || '').trim() || 'N/A',
+              subCategory: String(p.subcategory_name || p.subcategory || '').trim() || 'N/A',
+              uom: String(p.uom || 'NOS').trim(),
+              hsCode: String(p.hs_code || p.hsCode || '').trim() || 'N/A',
+              weight: formatNumber(p.weight),
+              cost: formatNumber(p.cost),
+              priceA: formatNumber(p.price_a || p.priceA),
+              priceB: formatNumber(p.price_b || p.priceB),
+              priceM: formatNumber(p.price_m || p.priceM),
+              origin: 'N/A', // Not in API
+              grade: 'A', // Not in API
+              status: (p.status || 'active').toUpperCase() === 'ACTIVE' ? 'A' : 'I',
+              rackNo: rackMapData[p.id] || 'N/A',
+              reOrderLevel: formatNumber(p.reorder_level || p.reorderLevel),
+            };
+          })
+          .filter((p: PartDetail) => p.partNo && p.partNo.trim() !== '');
+
+        setPartIdMap(idMap);
+        setPartsData(transformedParts);
+        console.log('Loaded parts from database:', transformedParts.length);
+      } catch (error: any) {
+        console.error('Error fetching parts:', error);
+        toast({
+          title: "Error",
+          description: error.message || "Failed to fetch parts from database",
+          variant: "destructive",
+        });
+      } finally {
+        setLoadingParts(false);
+      }
+    };
+
+    fetchParts();
+  }, []);
+
+  // Get unique master part numbers from database
   const masterPartNumbers = useMemo(() => {
-    const uniqueMasters = [...new Set(mockPartsData.map((item) => item.masterPart))].filter(Boolean);
+    const uniqueMasters = [...new Set(partsData.map((item) => item.masterPart))].filter(Boolean);
     if (masterPartSearch) {
       return uniqueMasters.filter((master) =>
         master.toLowerCase().includes(masterPartSearch.toLowerCase())
       );
     }
     return uniqueMasters;
-  }, [masterPartSearch]);
+  }, [masterPartSearch, partsData]);
 
   // Filter parts based on search and selected master part
   const filteredParts = useMemo(() => {
-    let filtered = mockPartsData;
+    let filtered = partsData;
     if (selectedMasterPart) {
       filtered = filtered.filter((item) => item.masterPart === selectedMasterPart);
     }
     if (partNoSearch) {
+      const searchLower = partNoSearch.toLowerCase();
       filtered = filtered.filter(
         (item) =>
-          item.partNo.toLowerCase().includes(partNoSearch.toLowerCase()) ||
-          item.description.toLowerCase().includes(partNoSearch.toLowerCase()) ||
-          item.brand.toLowerCase().includes(partNoSearch.toLowerCase())
+          item.partNo.toLowerCase().includes(searchLower) ||
+          item.description.toLowerCase().includes(searchLower) ||
+          item.brand.toLowerCase().includes(searchLower)
       );
     }
     return filtered;
-  }, [selectedMasterPart, partNoSearch]);
+  }, [selectedMasterPart, partNoSearch, partsData]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -234,10 +273,63 @@ export const SalesInquiry = () => {
     setPartNoSearch("");
   };
 
-  const handleSelectPart = (part: PartDetail) => {
+  const handleSelectPart = async (part: PartDetail) => {
     setSelectedPart(part);
     setPartNoSearch(part.partNo);
     setShowPartDropdown(false);
+    
+    // Fetch full part details if we have the ID
+    if (part.id) {
+      setLoadingPartDetails(true);
+      try {
+        const response = await apiClient.getPart(part.id);
+        if (response.error) {
+          console.error('Error fetching part details:', response.error);
+          // Keep the selected part from list if API fails
+          return;
+        }
+        
+        const p = response.data || response;
+        
+        // Format numbers properly
+        const formatNumber = (val: any): string => {
+          if (val === null || val === undefined || val === '') return '0';
+          const num = parseFloat(val);
+          if (isNaN(num)) return '0';
+          return num % 1 === 0 ? String(num) : num.toFixed(2);
+        };
+        
+        // Update selected part with full details
+        const fullPartDetails: PartDetail = {
+          id: p.id,
+          partNo: String(p.part_no || p.partNo || '').trim(),
+          masterPart: String(p.master_part_no || p.masterPart || '').trim() || 'N/A',
+          brand: String(p.brand_name || p.brand || '').trim() || 'N/A',
+          description: String(p.description || '').trim() || 'No description',
+          category: String(p.category_name || p.category || '').trim() || 'N/A',
+          subCategory: String(p.subcategory_name || p.subcategory || '').trim() || 'N/A',
+          uom: String(p.uom || 'NOS').trim(),
+          hsCode: String(p.hs_code || p.hsCode || '').trim() || 'N/A',
+          weight: formatNumber(p.weight),
+          cost: formatNumber(p.cost),
+          priceA: formatNumber(p.price_a || p.priceA),
+          priceB: formatNumber(p.price_b || p.priceB),
+          priceM: formatNumber(p.price_m || p.priceM),
+          origin: 'N/A',
+          grade: 'A',
+          status: (p.status || 'active').toUpperCase() === 'ACTIVE' ? 'A' : 'I',
+          rackNo: (rackMap[p.id] && rackMap[p.id] !== 'N/A') ? rackMap[p.id] : 'N/A',
+          reOrderLevel: formatNumber(p.reorder_level || p.reorderLevel),
+        };
+        
+        setSelectedPart(fullPartDetails);
+      } catch (error: any) {
+        console.error('Error fetching part details:', error);
+        // Keep the selected part from list if API fails
+      } finally {
+        setLoadingPartDetails(false);
+      }
+    }
   };
 
   const handleClearSearch = () => {
@@ -245,6 +337,106 @@ export const SalesInquiry = () => {
     setSelectedMasterPart(null);
     setPartNoSearch("");
     setSelectedPart(null);
+  };
+
+  const handleRefreshParts = async () => {
+    setLoadingParts(true);
+    try {
+      const [partsResponse, balancesResponse] = await Promise.all([
+        apiClient.getParts({ 
+          status: 'active',
+          limit: 10000,
+          page: 1 
+        }),
+        apiClient.getStockBalances({ limit: 10000 }).catch(() => ({ data: [], error: null }))
+      ]);
+
+      let partsDataArray: any[] = [];
+      if (Array.isArray(partsResponse)) {
+        partsDataArray = partsResponse;
+      } else if (partsResponse.data && Array.isArray(partsResponse.data)) {
+        partsDataArray = partsResponse.data;
+      } else if (partsResponse.pagination && partsResponse.data) {
+        partsDataArray = partsResponse.data;
+      }
+
+      let balancesData: any[] = [];
+      if (Array.isArray(balancesResponse)) {
+        balancesData = balancesResponse;
+      } else if (balancesResponse.data && Array.isArray(balancesResponse.data)) {
+        balancesData = balancesResponse.data;
+      }
+
+      const rackMapData: Record<string, string> = {};
+      if (Array.isArray(balancesData)) {
+        balancesData.forEach((b: any) => {
+          if (b.part_id && b.rack_no) {
+            rackMapData[b.part_id] = b.rack_no;
+          }
+        });
+      }
+      setRackMap(rackMapData);
+
+      // Create part ID map
+      const idMap: Record<string, string> = {};
+      
+      // Format numbers properly
+      const formatNumber = (val: any): string => {
+        if (val === null || val === undefined || val === '') return '0';
+        const num = parseFloat(val);
+        if (isNaN(num)) return '0';
+        return num % 1 === 0 ? String(num) : num.toFixed(2);
+      };
+      
+      const transformedParts: PartDetail[] = partsDataArray
+        .filter((p: any) => p.status === 'active' || !p.status)
+        .map((p: any) => {
+          const partNo = String(p.part_no || p.partNo || '').trim();
+          if (partNo && p.id) {
+            idMap[partNo] = p.id;
+          }
+          
+          return {
+            id: p.id,
+            partNo: partNo,
+            masterPart: String(p.master_part_no || p.masterPart || p.master_part_no || '').trim() || 'N/A',
+            brand: String(p.brand_name || p.brand || '').trim() || 'N/A',
+            description: String(p.description || p.part_no || '').trim() || 'No description',
+            category: String(p.category_name || p.category || '').trim() || 'N/A',
+            subCategory: String(p.subcategory_name || p.subcategory || '').trim() || 'N/A',
+            uom: String(p.uom || 'NOS').trim(),
+            hsCode: String(p.hs_code || p.hsCode || '').trim() || 'N/A',
+            weight: formatNumber(p.weight),
+            cost: formatNumber(p.cost),
+            priceA: formatNumber(p.price_a || p.priceA),
+            priceB: formatNumber(p.price_b || p.priceB),
+            priceM: formatNumber(p.price_m || p.priceM),
+            origin: 'N/A',
+            grade: 'A',
+            status: (p.status || 'active').toUpperCase() === 'ACTIVE' ? 'A' : 'I',
+            rackNo: rackMapData[p.id] || 'N/A',
+            reOrderLevel: formatNumber(p.reorder_level || p.reorderLevel),
+          };
+        })
+        .filter((p: PartDetail) => p.partNo && p.partNo.trim() !== '');
+
+      setPartIdMap(idMap);
+
+      setPartsData(transformedParts);
+      toast({
+        title: "Parts Refreshed",
+        description: `Loaded ${transformedParts.length} parts from database.`,
+      });
+    } catch (error: any) {
+      console.error('Error refreshing parts:', error);
+      toast({
+        title: "Error",
+        description: "Failed to refresh parts",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingParts(false);
+    }
   };
 
   const handleView = (inquiry: Inquiry) => {
@@ -358,11 +550,25 @@ export const SalesInquiry = () => {
       {/* Part Lookup Section */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Package className="h-5 w-5 text-primary" />
-            <CardTitle className="text-lg font-semibold">Part Inquiry Lookup</CardTitle>
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <Package className="h-5 w-5 text-primary" />
+                <CardTitle className="text-lg font-semibold">Part Inquiry Lookup</CardTitle>
+              </div>
+              <p className="text-sm text-muted-foreground mt-1">Search for part details using Master Part or Part Number</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefreshParts}
+              disabled={loadingParts}
+              className="gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${loadingParts ? "animate-spin" : ""}`} />
+              {loadingParts ? "Loading..." : "Refresh"}
+            </Button>
           </div>
-          <p className="text-sm text-muted-foreground">Search for part details using Master Part or Part Number</p>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Search Fields with Dropdowns */}
@@ -392,7 +598,11 @@ export const SalesInquiry = () => {
               {/* Master Part Dropdown */}
               {showMasterDropdown && (
                 <div className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-lg shadow-lg max-h-60 overflow-auto">
-                  {masterPartNumbers.length > 0 ? (
+                  {loadingParts ? (
+                    <div className="px-4 py-3 text-sm text-muted-foreground text-center">
+                      Loading master parts...
+                    </div>
+                  ) : masterPartNumbers.length > 0 ? (
                     masterPartNumbers.map((master) => (
                       <button
                         key={master}
@@ -407,7 +617,7 @@ export const SalesInquiry = () => {
                     ))
                   ) : (
                     <div className="px-4 py-3 text-sm text-muted-foreground">
-                      No master part numbers found
+                      {masterPartSearch ? "No master part numbers found matching your search" : "No master part numbers available"}
                     </div>
                   )}
                 </div>
@@ -439,7 +649,11 @@ export const SalesInquiry = () => {
               {/* Part Dropdown */}
               {showPartDropdown && (
                 <div className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-lg shadow-lg max-h-80 overflow-auto">
-                  {filteredParts.length > 0 ? (
+                  {loadingParts ? (
+                    <div className="px-4 py-3 text-sm text-muted-foreground text-center">
+                      Loading parts...
+                    </div>
+                  ) : filteredParts.length > 0 ? (
                     filteredParts.map((part) => (
                       <button
                         key={part.partNo}
@@ -458,7 +672,7 @@ export const SalesInquiry = () => {
                     ))
                   ) : (
                     <div className="px-4 py-3 text-sm text-muted-foreground">
-                      No parts found
+                      {partNoSearch ? "No parts found matching your search" : "No parts available"}
                     </div>
                   )}
                 </div>
@@ -473,10 +687,17 @@ export const SalesInquiry = () => {
           {/* Part Details Display (Read-only) */}
           {selectedPart && (
             <div className="mt-4 p-4 rounded-lg bg-muted/30 border">
-              <h4 className="text-sm font-semibold mb-4 flex items-center gap-2 text-primary">
-                <Package className="h-4 w-4" />
-                Part Details - {selectedPart.partNo}
-              </h4>
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-sm font-semibold flex items-center gap-2 text-primary">
+                  <Package className="h-4 w-4" />
+                  Part Details - {selectedPart.partNo}
+                </h4>
+                {loadingPartDetails && (
+                  <Badge variant="outline" className="text-xs">
+                    Loading details...
+                  </Badge>
+                )}
+              </div>
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Part No</Label>
@@ -508,11 +729,15 @@ export const SalesInquiry = () => {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">HS Code</Label>
-                  <div className="text-sm font-medium bg-background px-2 py-1.5 rounded border">{selectedPart.hsCode}</div>
+                  <div className="text-sm font-medium bg-background px-2 py-1.5 rounded border">
+                    {selectedPart.hsCode && selectedPart.hsCode !== 'N/A' ? selectedPart.hsCode : 'N/A'}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Weight (Kg)</Label>
-                  <div className="text-sm font-medium bg-background px-2 py-1.5 rounded border">{selectedPart.weight}</div>
+                  <div className="text-sm font-medium bg-background px-2 py-1.5 rounded border">
+                    {selectedPart.weight && selectedPart.weight !== '0' ? selectedPart.weight : '0'}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Origin</Label>
@@ -524,19 +749,27 @@ export const SalesInquiry = () => {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Cost</Label>
-                  <div className="text-sm font-medium bg-background px-2 py-1.5 rounded border text-primary">Rs {selectedPart.cost}</div>
+                  <div className="text-sm font-medium bg-background px-2 py-1.5 rounded border text-primary">
+                    Rs {selectedPart.cost && selectedPart.cost !== '0' ? parseFloat(selectedPart.cost).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Price-A</Label>
-                  <div className="text-sm font-medium bg-background px-2 py-1.5 rounded border text-green-600">Rs {selectedPart.priceA}</div>
+                  <div className="text-sm font-medium bg-background px-2 py-1.5 rounded border text-green-600">
+                    Rs {selectedPart.priceA && selectedPart.priceA !== '0' ? parseFloat(selectedPart.priceA).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Price-B</Label>
-                  <div className="text-sm font-medium bg-background px-2 py-1.5 rounded border text-green-600">Rs {selectedPart.priceB}</div>
+                  <div className="text-sm font-medium bg-background px-2 py-1.5 rounded border text-green-600">
+                    Rs {selectedPart.priceB && selectedPart.priceB !== '0' ? parseFloat(selectedPart.priceB).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Price-M</Label>
-                  <div className="text-sm font-medium bg-background px-2 py-1.5 rounded border text-green-600">Rs {selectedPart.priceM}</div>
+                  <div className="text-sm font-medium bg-background px-2 py-1.5 rounded border text-green-600">
+                    Rs {selectedPart.priceM && selectedPart.priceM !== '0' ? parseFloat(selectedPart.priceM).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Rack No</Label>
@@ -604,25 +837,8 @@ export const SalesInquiry = () => {
                     </TableHeader>
                     <TableBody>
                       <TableRow>
-                        <TableCell className="text-xs font-medium">PO-2024-001</TableCell>
-                        <TableCell className="text-xs">15/12/2024</TableCell>
-                        <TableCell className="text-xs">ABC Suppliers</TableCell>
-                        <TableCell className="text-xs">50</TableCell>
-                        <TableCell className="text-xs">Rs 95.00</TableCell>
-                        <TableCell className="text-xs">Rs 4,750.00</TableCell>
-                        <TableCell>
-                          <Badge variant="default" className="text-xs">Received</Badge>
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-xs font-medium">PO-2024-002</TableCell>
-                        <TableCell className="text-xs">10/11/2024</TableCell>
-                        <TableCell className="text-xs">XYZ Trading</TableCell>
-                        <TableCell className="text-xs">100</TableCell>
-                        <TableCell className="text-xs">Rs 92.00</TableCell>
-                        <TableCell className="text-xs">Rs 9,200.00</TableCell>
-                        <TableCell>
-                          <Badge variant="secondary" className="text-xs">Pending</Badge>
+                        <TableCell colSpan={7} className="text-center py-8 text-muted-foreground text-sm">
+                          No purchase order history available for this part
                         </TableCell>
                       </TableRow>
                     </TableBody>
@@ -645,21 +861,8 @@ export const SalesInquiry = () => {
                     </TableHeader>
                     <TableBody>
                       <TableRow>
-                        <TableCell className="text-xs font-medium">KIT-001</TableCell>
-                        <TableCell className="text-xs">Brake Service Kit</TableCell>
-                        <TableCell className="text-xs">2</TableCell>
-                        <TableCell className="text-xs">Rs 1,500.00</TableCell>
-                        <TableCell>
-                          <Badge variant="default" className="text-xs">Active</Badge>
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-xs font-medium">KIT-002</TableCell>
-                        <TableCell className="text-xs">Full Service Package</TableCell>
-                        <TableCell className="text-xs">1</TableCell>
-                        <TableCell className="text-xs">Rs 3,200.00</TableCell>
-                        <TableCell>
-                          <Badge variant="default" className="text-xs">Active</Badge>
+                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground text-sm">
+                          No related kits found for this part
                         </TableCell>
                       </TableRow>
                     </TableBody>
@@ -680,24 +883,19 @@ export const SalesInquiry = () => {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      <TableRow>
-                        <TableCell className="text-xs font-medium">Toyota Camry</TableCell>
-                        <TableCell className="text-xs">2018-2024</TableCell>
-                        <TableCell className="text-xs">4</TableCell>
-                        <TableCell className="text-xs">Front Brakes</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-xs font-medium">Honda Civic</TableCell>
-                        <TableCell className="text-xs">2019-2023</TableCell>
-                        <TableCell className="text-xs">4</TableCell>
-                        <TableCell className="text-xs">Front & Rear Brakes</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-xs font-medium">Nissan Altima</TableCell>
-                        <TableCell className="text-xs">2020-2024</TableCell>
-                        <TableCell className="text-xs">2</TableCell>
-                        <TableCell className="text-xs">Rear Brakes</TableCell>
-                      </TableRow>
+                      {selectedPart && partsData.find(p => p.partNo === selectedPart.partNo) ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="text-center py-8 text-muted-foreground text-sm">
+                            No model information available for this part
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={4} className="text-center py-8 text-muted-foreground text-sm">
+                            Select a part to view model information
+                          </TableCell>
+                        </TableRow>
+                      )}
                     </TableBody>
                   </Table>
                 </div>
@@ -720,25 +918,8 @@ export const SalesInquiry = () => {
                     </TableHeader>
                     <TableBody>
                       <TableRow>
-                        <TableCell className="text-xs font-medium">DPO-2024-015</TableCell>
-                        <TableCell className="text-xs">20/12/2024</TableCell>
-                        <TableCell className="text-xs">Auto Parts Store</TableCell>
-                        <TableCell className="text-xs">25</TableCell>
-                        <TableCell className="text-xs">Rs 140.00</TableCell>
-                        <TableCell className="text-xs">Rs 3,500.00</TableCell>
-                        <TableCell>
-                          <Badge variant="default" className="text-xs">Received</Badge>
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-xs font-medium">DPO-2024-012</TableCell>
-                        <TableCell className="text-xs">05/12/2024</TableCell>
-                        <TableCell className="text-xs">Quick Service Center</TableCell>
-                        <TableCell className="text-xs">10</TableCell>
-                        <TableCell className="text-xs">Rs 145.00</TableCell>
-                        <TableCell className="text-xs">Rs 1,450.00</TableCell>
-                        <TableCell>
-                          <Badge variant="secondary" className="text-xs">Processing</Badge>
+                        <TableCell colSpan={7} className="text-center py-8 text-muted-foreground text-sm">
+                          No direct purchase order history available for this part
                         </TableCell>
                       </TableRow>
                     </TableBody>

@@ -8,9 +8,11 @@ import { Calendar, Download, Printer, RefreshCw, Scale, CheckCircle2, AlertCircl
 import { Badge } from "@/components/ui/badge";
 
 interface TrialBalanceRow {
-  accountCode: string;
+  type?: 'mainGroup' | 'subgroup' | 'account';
+  code?: string;
+  accountCode?: string;
   accountName: string;
-  accountType: string;
+  accountType?: string;
   debit: number;
   credit: number;
 }
@@ -18,26 +20,31 @@ interface TrialBalanceRow {
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
 export const TrialBalanceTab = () => {
-  const [period, setPeriod] = useState("december-2024");
+  const [fromDate, setFromDate] = useState("2025-12-01");
+  const [toDate, setToDate] = useState("2025-12-26");
   const [filterType, setFilterType] = useState("all");
   const [trialBalanceData, setTrialBalanceData] = useState<TrialBalanceRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchTrialBalance();
-  }, [period, filterType]);
+  }, [fromDate, toDate, filterType]);
 
   const fetchTrialBalance = async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams();
-      params.append("period", period);
+      params.append("from_date", fromDate);
+      params.append("to_date", toDate);
       if (filterType !== "all") params.append("type", filterType);
       
       const response = await fetch(`${API_URL}/api/accounting/trial-balance?${params}`);
       if (response.ok) {
         const data = await response.json();
         setTrialBalanceData(data);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("Error fetching trial balance:", errorData.error || response.statusText);
       }
     } catch (error) {
       console.error("Error fetching trial balance:", error);
@@ -124,13 +131,14 @@ export const TrialBalanceTab = () => {
     URL.revokeObjectURL(url);
   };
 
-  const filteredData = filterType === "all" 
-    ? trialBalanceData 
-    : trialBalanceData.filter(row => row.accountType.toLowerCase() === filterType);
-
-  const totalDebit = filteredData.reduce((sum, row) => sum + row.debit, 0);
-  const totalCredit = filteredData.reduce((sum, row) => sum + row.credit, 0);
-  const isBalanced = totalDebit === totalCredit;
+  // Filter data (already filtered on backend, but keep for safety)
+  const filteredData = trialBalanceData;
+  
+  // Calculate totals from account rows only (exclude group headers)
+  const accountRows = filteredData.filter(row => row.type === 'account' || !row.type);
+  const totalDebit = accountRows.reduce((sum, row) => sum + (row.debit || 0), 0);
+  const totalCredit = accountRows.reduce((sum, row) => sum + (row.credit || 0), 0);
+  const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01;
   const difference = Math.abs(totalDebit - totalCredit);
 
   const getTypeColor = (type: string) => {
@@ -220,39 +228,39 @@ export const TrialBalanceTab = () => {
               Trial Balance
             </CardTitle>
             <div className="flex flex-wrap items-center gap-3">
-              <Select value={period} onValueChange={setPeriod}>
-                <SelectTrigger className="w-[180px]">
-                  <Calendar className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Select Period" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="december-2024">December 2024</SelectItem>
-                  <SelectItem value="november-2024">November 2024</SelectItem>
-                  <SelectItem value="october-2024">October 2024</SelectItem>
-                  <SelectItem value="q4-2024">Q4 2024</SelectItem>
-                  <SelectItem value="fy-2024">FY 2024</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger className="w-[150px]">
-                  <SelectValue placeholder="Account Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="asset">Assets</SelectItem>
-                  <SelectItem value="liability">Liabilities</SelectItem>
-                  <SelectItem value="equity">Equity</SelectItem>
-                  <SelectItem value="revenue">Revenue</SelectItem>
-                  <SelectItem value="expense">Expenses</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-muted-foreground">From:</label>
+                <Input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="w-[150px]"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-muted-foreground">To:</label>
+                <Input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="w-[150px]"
+                />
+              </div>
+              <Button 
+                variant="default" 
+                size="sm" 
+                onClick={fetchTrialBalance}
+                className="transition-all duration-200 hover:scale-105"
+              >
+                Search
+              </Button>
               <Button variant="outline" size="sm" className="transition-all duration-200 hover:scale-105" onClick={handlePrint}>
                 <Printer className="h-4 w-4 mr-2" />
                 Print
               </Button>
               <Button variant="outline" size="sm" className="transition-all duration-200 hover:scale-105" onClick={handleExport}>
                 <Download className="h-4 w-4 mr-2" />
-                Export
+                Export CSV
               </Button>
             </div>
           </div>
@@ -262,46 +270,98 @@ export const TrialBalanceTab = () => {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50">
-                  <TableHead className="font-semibold">Account Code</TableHead>
-                  <TableHead className="font-semibold">Account Name</TableHead>
-                  <TableHead className="font-semibold">Type</TableHead>
-                  <TableHead className="text-right font-semibold">Debit (Rs)</TableHead>
-                  <TableHead className="text-right font-semibold">Credit (Rs)</TableHead>
+                  <TableHead className="font-semibold cursor-pointer hover:text-primary">Account</TableHead>
+                  <TableHead className="text-right font-semibold cursor-pointer hover:text-primary">Dr</TableHead>
+                  <TableHead className="text-right font-semibold cursor-pointer hover:text-primary">Cr</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredData.map((row, index) => (
-                  <TableRow 
-                    key={row.accountCode} 
-                    className="transition-all duration-200 hover:bg-muted/50"
-                    style={{ animationDelay: `${index * 50}ms` }}
-                  >
-                    <TableCell className="font-mono text-sm">{row.accountCode}</TableCell>
-                    <TableCell className="font-medium">{row.accountName}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={getTypeColor(row.accountType)}>
-                        {row.accountType}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {row.debit > 0 ? `Rs ${row.debit.toLocaleString()}` : '-'}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {row.credit > 0 ? `Rs ${row.credit.toLocaleString()}` : '-'}
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
+                      Loading...
                     </TableCell>
                   </TableRow>
-                ))}
-                {/* Total Row */}
-                <TableRow className="bg-primary/5 font-bold border-t-2 border-primary/20">
-                  <TableCell colSpan={3} className="text-right">Total</TableCell>
-                  <TableCell className="text-right font-mono text-primary">Rs {totalDebit.toLocaleString()}</TableCell>
-                  <TableCell className="text-right font-mono text-primary">Rs {totalCredit.toLocaleString()}</TableCell>
-                </TableRow>
+                ) : filteredData.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
+                      No data found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  <>
+                    {filteredData.map((row, index) => {
+                      if (row.type === 'mainGroup') {
+                        return (
+                          <TableRow key={`main-${row.code}-${index}`} className="bg-muted/30 font-semibold">
+                            <TableCell className="font-bold">{row.name}</TableCell>
+                            <TableCell className="text-right font-mono">0</TableCell>
+                            <TableCell className="text-right font-mono">0</TableCell>
+                          </TableRow>
+                        );
+                      } else if (row.type === 'subgroup') {
+                        return (
+                          <TableRow key={`sub-${row.code}-${index}`} className="bg-muted/20 font-medium">
+                            <TableCell className="pl-4">{row.name}</TableCell>
+                            <TableCell className="text-right font-mono">0</TableCell>
+                            <TableCell className="text-right font-mono">0</TableCell>
+                          </TableRow>
+                        );
+                      } else {
+                        return (
+                          <TableRow 
+                            key={`acc-${row.accountCode}-${index}`} 
+                            className="transition-all duration-200 hover:bg-muted/50"
+                          >
+                            <TableCell className="pl-8 font-medium">{row.accountName}</TableCell>
+                            <TableCell className="text-right font-mono">
+                              {row.debit > 0 ? row.debit.toLocaleString() : '0'}
+                            </TableCell>
+                            <TableCell className="text-right font-mono">
+                              {row.credit > 0 ? row.credit.toLocaleString() : '0'}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+                    })}
+                    {/* Total Row */}
+                    <TableRow className="bg-primary/5 font-bold border-t-2 border-primary/20">
+                      <TableCell className="text-right">Total</TableCell>
+                      <TableCell className="text-right font-mono text-primary">{totalDebit.toLocaleString()}</TableCell>
+                      <TableCell className="text-right font-mono text-primary">{totalCredit.toLocaleString()}</TableCell>
+                    </TableRow>
+                  </>
+                )}
               </TableBody>
             </Table>
           </div>
         </CardContent>
       </Card>
+
+      {/* Balance Status */}
+      {!loading && filteredData.length > 0 && (
+        <Card className={`border-2 ${isBalanced ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              {isBalanced ? (
+                <>
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                  <span className="font-medium text-emerald-600">
+                    Trial Balance is balanced - Debits equal Credits
+                  </span>
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="h-5 w-5 text-red-600" />
+                  <span className="font-medium text-red-600">
+                    Trial Balance is not balanced. Difference: Rs {difference.toLocaleString()}
+                  </span>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };

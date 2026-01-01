@@ -17,6 +17,7 @@ import approvalFlowsRoutes from './routes/approval-flows';
 import backupsRoutes from './routes/backups';
 import companyProfileRoutes from './routes/company-profile';
 import whatsappSettingsRoutes from './routes/whatsapp-settings';
+import longcatSettingsRoutes from './routes/longcat-settings';
 import kitsRoutes from './routes/kits';
 
 dotenv.config();
@@ -41,6 +42,17 @@ app.use(cors({
       if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
         callback(null, true);
       } else {
+        // In production, allow requests from same origin (when served through Nginx)
+        // This allows the frontend served from the same domain to access the API
+        const isProduction = process.env.NODE_ENV === 'production';
+        if (isProduction) {
+          // Allow if origin matches the server IP or domain
+          const serverOrigin = process.env.SERVER_ORIGIN || 'http://103.60.12.157';
+          if (origin.startsWith(serverOrigin) || origin.includes('103.60.12.157')) {
+            callback(null, true);
+            return;
+          }
+        }
         callback(new Error('Not allowed by CORS'));
       }
     }
@@ -49,8 +61,9 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Increase body parser limit to handle image uploads (base64 encoded images can be large)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Health check
 app.get('/health', (req, res) => {
@@ -74,6 +87,7 @@ app.use('/api/approval-flows', approvalFlowsRoutes);
 app.use('/api/backups', backupsRoutes);
 app.use('/api/company-profile', companyProfileRoutes);
 app.use('/api/whatsapp-settings', whatsappSettingsRoutes);
+app.use('/api/longcat-settings', longcatSettingsRoutes);
 app.use('/api/kits', kitsRoutes);
 
 // Error handling middleware

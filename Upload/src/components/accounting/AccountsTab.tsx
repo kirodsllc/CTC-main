@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -70,14 +70,21 @@ export const AccountsTab = () => {
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [filterMainGroup, setFilterMainGroup] = useState<string>("all");
   const [filterSubGroup, setFilterSubGroup] = useState<string>("all");
-  const [filterStatus, setFilterStatus] = useState<string>("active");
+  const [filterStatus, setFilterStatus] = useState<string>("all");
   const [pageSize, setPageSize] = useState("10");
   const [currentPage, setCurrentPage] = useState(1);
+  
+  // Dynamic data from API
+  const [mainGroups, setMainGroups] = useState<{ id: string; code: string; name: string }[]>([]);
+  const [subGroups, setSubGroups] = useState<{ id: string; code: string; name: string; mainGroupId: string }[]>([]);
   
   const [isAddAccountDialogOpen, setIsAddAccountDialogOpen] = useState(false);
   const [isAddPersonDialogOpen, setIsAddPersonDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  
+  // Ref to prevent useEffect from fetching when we manually fetch
+  const isManualFetchRef = useRef(false);
   
   const [formData, setFormData] = useState({
     mainGroup: "",
@@ -87,42 +94,122 @@ export const AccountsTab = () => {
     accountName: "",
   });
 
+  // Since we're fetching filtered data from API, use accounts directly
+  // But also apply client-side filtering for status if needed (for case-insensitive matching)
   const filteredAccounts = accounts.filter((acc) => {
-    const matchesGroup = filterMainGroup === "all" || acc.group.includes(filterMainGroup);
-    const matchesSubGroup = filterSubGroup === "all" || acc.subGroup === filterSubGroup;
-    const matchesStatus = filterStatus === "all" || acc.status.toLowerCase() === filterStatus;
-    return matchesGroup && matchesSubGroup && matchesStatus;
+    // API already filters by mainGroup and subGroup, but we check status client-side for case-insensitive matching
+    const matchesStatus = filterStatus === "all" || acc.status.toLowerCase() === filterStatus.toLowerCase();
+    return matchesStatus;
   });
 
-  const totalPages = Math.ceil(filteredAccounts.length / parseInt(pageSize));
+  const totalPages = Math.ceil(filteredAccounts.length / parseInt(pageSize)) || 1;
   const paginatedAccounts = filteredAccounts.slice(
     (currentPage - 1) * parseInt(pageSize),
     currentPage * parseInt(pageSize)
   );
 
-  const availableSubGroups = formData.mainGroup ? subGroupMapping[formData.mainGroup] || [] : [];
+  // Get available subgroups based on selected main group in form
+  const availableSubGroups = formData.mainGroup 
+    ? subGroups.filter(sg => {
+        const mainGroup = mainGroups.find(mg => mg.name === formData.mainGroup || mg.id === formData.mainGroup);
+        return mainGroup && sg.mainGroupId === mainGroup.id;
+      })
+    : [];
 
+  // Reset to page 1 when filters change
   useEffect(() => {
-    fetchAccounts();
-  }, [filterMainGroup, filterSubGroup, filterStatus]);
+    setCurrentPage(1);
+  }, [filterMainGroup, filterSubGroup, filterStatus, pageSize]);
 
-  const fetchAccounts = async () => {
+  // Fetch main groups and subgroups on mount
+  useEffect(() => {
+    const fetchMainGroups = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/accounting/main-groups`);
+        if (response.ok) {
+          const data = await response.json();
+          setMainGroups(data);
+        }
+      } catch (error) {
+        console.error("Error fetching main groups:", error);
+      }
+    };
+
+    const fetchSubGroups = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/accounting/subgroups`);
+        if (response.ok) {
+          const data = await response.json();
+          setSubGroups(data);
+        }
+      } catch (error) {
+        console.error("Error fetching subgroups:", error);
+      }
+    };
+
+    fetchMainGroups();
+    fetchSubGroups();
+  }, []);
+
+  // Reset subgroup when main group changes
+  useEffect(() => {
+    if (formData.mainGroup) {
+      setFormData(prev => ({ ...prev, subGroup: "" }));
+    }
+  }, [formData.mainGroup]);
+
+  // Fetch accounts when filters change, but only after mainGroups and subGroups are loaded
+  useEffect(() => {
+    // Skip if this is a manual fetch
+    if (isManualFetchRef.current) {
+      isManualFetchRef.current = false;
+      return;
+    }
+    // Only fetch if we have mainGroups loaded (or if filter is "all")
+    if (mainGroups.length > 0 || filterMainGroup === "all") {
+      fetchAccounts();
+    }
+  }, [filterMainGroup, filterSubGroup, filterStatus]);
+  
+  // Initial fetch when mainGroups are loaded
+  useEffect(() => {
+    if (mainGroups.length > 0 && !isManualFetchRef.current) {
+      fetchAccounts();
+    }
+  }, [mainGroups.length]);
+
+  const fetchAccounts = async (overrideFilters?: { mainGroup?: string; subGroup?: string; status?: string }) => {
     try {
       setLoading(true);
       const params = new URLSearchParams();
-      if (filterMainGroup !== "all") {
-        params.append("mainGroupId", filterMainGroup);
+      
+      // Use override filters if provided, otherwise use state filters
+      const mainGroupFilter = overrideFilters?.mainGroup ?? filterMainGroup;
+      const subGroupFilter = overrideFilters?.subGroup ?? filterSubGroup;
+      const statusFilter = overrideFilters?.status ?? filterStatus;
+      
+      if (mainGroupFilter !== "all" && mainGroups.length > 0) {
+        const mainGroup = mainGroups.find(mg => mg.name === mainGroupFilter);
+        if (mainGroup) {
+          params.append("mainGroupId", mainGroup.id);
+        }
       }
-      if (filterSubGroup !== "all") {
-        params.append("subgroupId", filterSubGroup);
+      if (subGroupFilter !== "all" && subGroups.length > 0) {
+        const subGroup = subGroups.find(sg => sg.name === subGroupFilter);
+        if (subGroup) {
+          params.append("subgroupId", subGroup.id);
+        }
       }
-      if (filterStatus !== "all") {
-        params.append("status", filterStatus);
+      if (statusFilter !== "all") {
+        // Normalize status to match backend (capitalize first letter)
+        const normalizedStatus = statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1).toLowerCase();
+        params.append("status", normalizedStatus);
       }
       
       const response = await fetch(`${API_URL}/api/accounting/accounts?${params}`);
       if (response.ok) {
         const data = await response.json();
+        console.log("Fetched accounts:", data.length, "accounts");
         const transformed = data.map((acc: any) => ({
           id: acc.id,
           group: `${acc.subgroup?.mainGroup?.code || ''}-${acc.subgroup?.mainGroup?.name || ''}`,
@@ -132,8 +219,11 @@ export const AccountsTab = () => {
           status: acc.status,
           canDelete: acc.canDelete,
         }));
+        console.log("Transformed accounts:", transformed.length, "accounts");
         setAccounts(transformed);
       } else {
+        const errorText = await response.text();
+        console.error("Failed to load accounts:", response.status, errorText);
         toast.error("Failed to load accounts");
       }
     } catch (error) {
@@ -161,25 +251,40 @@ export const AccountsTab = () => {
   };
 
   const handleAddAccount = async () => {
+    console.log("handleAddAccount called with formData:", formData);
     if (!formData.mainGroup || !formData.subGroup || !formData.name) {
-      toast.error("Please fill all required fields");
+      toast.error("Please fill all required fields (Main Group, Sub Group, and Account Name)");
       return;
     }
     try {
-      // Find subgroup ID
-      const subgroupsResponse = await fetch(`${API_URL}/api/accounting/subgroups`);
-      const subgroups = await subgroupsResponse.json();
-      const subgroup = subgroups.find((sg: any) => sg.name === formData.subGroup);
+      // Find subgroup ID from state or API
+      let subgroup = subGroups.find((sg: any) => sg.name === formData.subGroup || sg.id === formData.subGroup);
+      
+      if (!subgroup) {
+        // Try to fetch from API if not in state
+        const subgroupsResponse = await fetch(`${API_URL}/api/accounting/subgroups`);
+        const subgroups = await subgroupsResponse.json();
+        subgroup = subgroups.find((sg: any) => sg.name === formData.subGroup);
+      }
       
       if (!subgroup) {
         toast.error("Subgroup not found");
         return;
       }
 
-      // Generate code
-      const existingCodes = accounts.map(a => parseInt(a.code.replace(/\D/g, ''))).filter(c => !isNaN(c));
-      const nextCode = existingCodes.length > 0 ? Math.max(...existingCodes) + 1 : 1001;
-      const code = String(nextCode);
+      // Generate code - fetch all accounts to get the max code
+      // This ensures we get the correct next code even if filters are applied
+      const allAccountsResponse = await fetch(`${API_URL}/api/accounting/accounts`);
+      let nextCode = 1001;
+      if (allAccountsResponse.ok) {
+        const allAccounts = await allAccountsResponse.json();
+        const existingCodes = allAccounts.map((a: any) => {
+          const num = parseInt(a.code.replace(/\D/g, ''));
+          return isNaN(num) ? 0 : num;
+        });
+        nextCode = existingCodes.length > 0 ? Math.max(...existingCodes) + 1 : 1001;
+      }
+      const code = String(nextCode).padStart(4, '0');
 
       const response = await fetch(`${API_URL}/api/accounting/accounts`, {
         method: 'POST',
@@ -188,24 +293,33 @@ export const AccountsTab = () => {
           subgroupId: subgroup.id,
           code,
           name: formData.name,
-          description: formData.description,
+          description: formData.description || formData.name,
           accountType: 'regular',
           status: 'Active',
         }),
       });
 
       if (response.ok) {
-        await fetchAccounts();
+        const newAccount = await response.json();
+        console.log("New account created:", newAccount);
+        toast.success(`Account "${newAccount.name}" added successfully!`);
         setIsAddAccountDialogOpen(false);
         resetForm();
-        toast.success("Account added successfully!");
+        // Mark as manual fetch to prevent useEffect from interfering
+        isManualFetchRef.current = true;
+        // Reset filters first
+        setFilterMainGroup("all");
+        setFilterSubGroup("all");
+        setFilterStatus("all");
+        // Fetch accounts with "all" filters immediately
+        await fetchAccounts({ mainGroup: "all", subGroup: "all", status: "all" });
       } else {
         const error = await response.json();
         toast.error(error.error || "Failed to add account");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error adding account:", error);
-      toast.error("Error adding account");
+      toast.error(error.message || "Error adding account");
     }
   };
 
@@ -215,18 +329,34 @@ export const AccountsTab = () => {
       return;
     }
     try {
-      const subgroupsResponse = await fetch(`${API_URL}/api/accounting/subgroups`);
-      const subgroups = await subgroupsResponse.json();
-      const subgroup = subgroups.find((sg: any) => sg.name === formData.subGroup);
+      // Find subgroup ID from state or API
+      let subgroup = subGroups.find((sg: any) => sg.name === formData.subGroup || sg.id === formData.subGroup);
+      
+      if (!subgroup) {
+        // Try to fetch from API if not in state
+        const subgroupsResponse = await fetch(`${API_URL}/api/accounting/subgroups`);
+        const subgroups = await subgroupsResponse.json();
+        subgroup = subgroups.find((sg: any) => sg.name === formData.subGroup);
+      }
       
       if (!subgroup) {
         toast.error("Subgroup not found");
         return;
       }
 
-      const existingCodes = accounts.map(a => parseInt(a.code.replace(/\D/g, ''))).filter(c => !isNaN(c));
-      const nextCode = existingCodes.length > 0 ? Math.max(...existingCodes) + 1 : 1001;
-      const code = String(nextCode);
+      // Generate code - fetch all accounts to get the max code
+      // This ensures we get the correct next code even if filters are applied
+      const allAccountsResponse = await fetch(`${API_URL}/api/accounting/accounts`);
+      let nextCode = 1001;
+      if (allAccountsResponse.ok) {
+        const allAccounts = await allAccountsResponse.json();
+        const existingCodes = allAccounts.map((a: any) => {
+          const num = parseInt(a.code.replace(/\D/g, ''));
+          return isNaN(num) ? 0 : num;
+        });
+        nextCode = existingCodes.length > 0 ? Math.max(...existingCodes) + 1 : 1001;
+      }
+      const code = String(nextCode).padStart(4, '0');
 
       const response = await fetch(`${API_URL}/api/accounting/accounts`, {
         method: 'POST',
@@ -235,24 +365,33 @@ export const AccountsTab = () => {
           subgroupId: subgroup.id,
           code,
           name: formData.accountName,
-          description: formData.description,
+          description: formData.description || formData.accountName,
           accountType: 'person',
           status: 'Active',
         }),
       });
 
       if (response.ok) {
-        await fetchAccounts();
+        const newAccount = await response.json();
+        console.log("New person account created:", newAccount);
+        toast.success(`Person's account "${newAccount.name}" added successfully!`);
         setIsAddPersonDialogOpen(false);
         resetForm();
-        toast.success("Person's account added successfully!");
+        // Mark as manual fetch to prevent useEffect from interfering
+        isManualFetchRef.current = true;
+        // Reset filters first
+        setFilterMainGroup("all");
+        setFilterSubGroup("all");
+        setFilterStatus("all");
+        // Fetch accounts with "all" filters immediately
+        await fetchAccounts({ mainGroup: "all", subGroup: "all", status: "all" });
       } else {
         const error = await response.json();
         toast.error(error.error || "Failed to add person's account");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error adding person's account:", error);
-      toast.error("Error adding person's account");
+      toast.error(error.message || "Error adding person's account");
     }
   };
 
@@ -271,10 +410,20 @@ export const AccountsTab = () => {
 
   const handleUpdateAccount = async () => {
     if (!editingAccount) return;
+    if (!formData.mainGroup || !formData.subGroup || !formData.name) {
+      toast.error("Please fill all required fields");
+      return;
+    }
     try {
-      const subgroupsResponse = await fetch(`${API_URL}/api/accounting/subgroups`);
-      const subgroups = await subgroupsResponse.json();
-      const subgroup = subgroups.find((sg: any) => sg.name === formData.subGroup);
+      // Find subgroup ID from state or API
+      let subgroup = subGroups.find((sg: any) => sg.name === formData.subGroup || sg.id === formData.subGroup);
+      
+      if (!subgroup) {
+        // Try to fetch from API if not in state
+        const subgroupsResponse = await fetch(`${API_URL}/api/accounting/subgroups`);
+        const subgroups = await subgroupsResponse.json();
+        subgroup = subgroups.find((sg: any) => sg.name === formData.subGroup);
+      }
       
       if (!subgroup) {
         toast.error("Subgroup not found");
@@ -287,7 +436,7 @@ export const AccountsTab = () => {
         body: JSON.stringify({
           subgroupId: subgroup.id,
           name: formData.name,
-          description: formData.description,
+          description: formData.description || formData.name,
           status: editingAccount.status,
         }),
       });
@@ -302,9 +451,9 @@ export const AccountsTab = () => {
         const error = await response.json();
         toast.error(error.error || "Failed to update account");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating account:", error);
-      toast.error("Error updating account");
+      toast.error(error.message || "Error updating account");
     }
   };
 
@@ -430,7 +579,10 @@ export const AccountsTab = () => {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <Button
-              onClick={() => setIsAddAccountDialogOpen(true)}
+              onClick={() => {
+                resetForm();
+                setIsAddAccountDialogOpen(true);
+              }}
               variant="outline"
               size="sm"
               className="transition-all duration-200 hover:scale-105"
@@ -439,7 +591,10 @@ export const AccountsTab = () => {
               Add New Account
             </Button>
             <Button
-              onClick={() => setIsAddPersonDialogOpen(true)}
+              onClick={() => {
+                resetForm();
+                setIsAddPersonDialogOpen(true);
+              }}
               variant="outline"
               size="sm"
               className="transition-all duration-200 hover:scale-105"
@@ -475,9 +630,9 @@ export const AccountsTab = () => {
                 </SelectTrigger>
                 <SelectContent className="bg-card border-border z-50">
                   <SelectItem value="all">All Groups</SelectItem>
-                  {mainGroupOptions.map((group) => (
-                    <SelectItem key={group} value={group}>
-                      {group}
+                  {mainGroups.map((group) => (
+                    <SelectItem key={group.id} value={group.name}>
+                      {group.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -491,11 +646,13 @@ export const AccountsTab = () => {
                 </SelectTrigger>
                 <SelectContent className="bg-card border-border z-50">
                   <SelectItem value="all">All Subgroups</SelectItem>
-                  {Object.values(subGroupMapping).flat().map((sg) => (
-                    <SelectItem key={sg} value={sg}>
-                      {sg}
-                    </SelectItem>
-                  ))}
+                  {subGroups
+                    .filter(sg => filterMainGroup === "all" || sg.mainGroupId === mainGroups.find(mg => mg.name === filterMainGroup)?.id)
+                    .map((sg) => (
+                      <SelectItem key={sg.id} value={sg.name}>
+                        {sg.name}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -546,7 +703,20 @@ export const AccountsTab = () => {
                 </tr>
               </thead>
               <tbody>
-                {paginatedAccounts.map((account, index) => (
+                {loading ? (
+                  <tr>
+                    <td colSpan={8} className="p-8 text-center text-muted-foreground">
+                      Loading accounts...
+                    </td>
+                  </tr>
+                ) : paginatedAccounts.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="p-8 text-center text-muted-foreground">
+                      No accounts found. Click "Add New Account" to create one.
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedAccounts.map((account, index) => (
                   <tr
                     key={account.id}
                     className={`border-b border-border/50 transition-colors duration-200 hover:bg-muted/30 ${
@@ -615,20 +785,21 @@ export const AccountsTab = () => {
                             <DropdownMenuItem onClick={() => handleViewTransactions(account)} className="cursor-pointer">
                               View Transactions
                             </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
 
           <div className="flex flex-col sm:flex-row items-center justify-between mt-4 gap-4">
             <p className="text-sm text-muted-foreground">
-              Showing <span className="text-primary">1</span> to{" "}
-              <span className="text-primary">{Math.min(parseInt(pageSize), filteredAccounts.length)}</span> of{" "}
+              Showing <span className="text-primary">{filteredAccounts.length > 0 ? (currentPage - 1) * parseInt(pageSize) + 1 : 0}</span> to{" "}
+              <span className="text-primary">{Math.min(currentPage * parseInt(pageSize), filteredAccounts.length)}</span> of{" "}
               <span className="text-primary">{filteredAccounts.length}</span> items
             </p>
             <div className="flex items-center gap-2">
@@ -714,9 +885,9 @@ export const AccountsTab = () => {
                   <SelectValue placeholder="Select..." />
                 </SelectTrigger>
                 <SelectContent className="bg-card border-border z-50">
-                  {mainGroupOptions.map((group) => (
-                    <SelectItem key={group} value={group}>
-                      {group}
+                  {mainGroups.map((group) => (
+                    <SelectItem key={group.id} value={group.name}>
+                      {group.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -734,8 +905,8 @@ export const AccountsTab = () => {
                 </SelectTrigger>
                 <SelectContent className="bg-card border-border z-50">
                   {availableSubGroups.map((sg) => (
-                    <SelectItem key={sg} value={sg}>
-                      {sg}
+                    <SelectItem key={sg.id} value={sg.name}>
+                      {sg.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -758,23 +929,24 @@ export const AccountsTab = () => {
               />
             </div>
           </div>
-          <DialogFooter className="flex justify-between sm:justify-between">
-            <Button variant="outline" onClick={resetForm}>
-              <RotateCcw className="h-4 w-4 mr-1" />
-              Reset
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setIsAddAccountDialogOpen(false);
+                resetForm();
+              }}
+            >
+              Cancel
             </Button>
-            <Button onClick={handleAddAccount}>
+            <Button 
+              onClick={handleAddAccount}
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
+            >
               <Save className="h-4 w-4 mr-1" />
               Save
             </Button>
           </DialogFooter>
-          <Button
-            variant="link"
-            onClick={() => setIsAddAccountDialogOpen(false)}
-            className="text-primary absolute bottom-4 right-4"
-          >
-            Close
-          </Button>
         </DialogContent>
       </Dialog>
 
@@ -795,9 +967,9 @@ export const AccountsTab = () => {
                   <SelectValue placeholder="Select..." />
                 </SelectTrigger>
                 <SelectContent className="bg-card border-border z-50">
-                  {mainGroupOptions.map((group) => (
-                    <SelectItem key={group} value={group}>
-                      {group}
+                  {mainGroups.map((group) => (
+                    <SelectItem key={group.id} value={group.name}>
+                      {group.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -815,8 +987,8 @@ export const AccountsTab = () => {
                 </SelectTrigger>
                 <SelectContent className="bg-card border-border z-50">
                   {availableSubGroups.map((sg) => (
-                    <SelectItem key={sg} value={sg}>
-                      {sg}
+                    <SelectItem key={sg.id} value={sg.name}>
+                      {sg.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -847,23 +1019,24 @@ export const AccountsTab = () => {
               />
             </div>
           </div>
-          <DialogFooter className="flex justify-between sm:justify-between">
-            <Button variant="outline" onClick={resetForm}>
-              <RotateCcw className="h-4 w-4 mr-1" />
-              Reset
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setIsAddPersonDialogOpen(false);
+                resetForm();
+              }}
+            >
+              Cancel
             </Button>
-            <Button onClick={handleAddPersonAccount}>
+            <Button 
+              onClick={handleAddPersonAccount}
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
+            >
               <Save className="h-4 w-4 mr-1" />
               Save
             </Button>
           </DialogFooter>
-          <Button
-            variant="link"
-            onClick={() => setIsAddPersonDialogOpen(false)}
-            className="text-primary absolute bottom-4 right-4"
-          >
-            Close
-          </Button>
         </DialogContent>
       </Dialog>
 
@@ -919,8 +1092,8 @@ export const AccountsTab = () => {
                 </SelectTrigger>
                 <SelectContent className="bg-card border-border z-50">
                   {availableSubGroups.map((sg) => (
-                    <SelectItem key={sg} value={sg}>
-                      {sg}
+                    <SelectItem key={sg.id} value={sg.name}>
+                      {sg.name}
                     </SelectItem>
                   ))}
                 </SelectContent>

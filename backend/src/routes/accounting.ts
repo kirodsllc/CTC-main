@@ -101,6 +101,32 @@ router.post('/main-groups', async (req: Request, res: Response) => {
   }
 });
 
+router.put('/main-groups/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { code, name, type, displayOrder } = req.body;
+    const group = await prisma.mainGroup.update({
+      where: { id },
+      data: { code, name, type, displayOrder },
+    });
+    res.json(group);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/main-groups/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await prisma.mainGroup.delete({
+      where: { id },
+    });
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ========== Subgroups ==========
 router.get('/subgroups', async (req: Request, res: Response) => {
   try {
@@ -420,6 +446,125 @@ router.post('/journal-entries/:id/post', async (req: Request, res: Response) => 
   }
 });
 
+// ========== General Journal ==========
+router.get('/general-journal', async (req: Request, res: Response) => {
+  try {
+    const { search_by, search, from_date, to_date, page = '1', limit = '10' } = req.query;
+    
+    // Build where clause for journal entries
+    const where: any = {
+      status: 'posted', // Only show posted entries
+    };
+    
+    // Date range filter
+    if (from_date || to_date) {
+      where.entryDate = {};
+      if (from_date) {
+        where.entryDate.gte = new Date(from_date as string);
+      }
+      if (to_date) {
+        where.entryDate.lte = new Date(to_date as string);
+      }
+    }
+    
+    // Search filter (SQLite doesn't support case-insensitive mode, so we'll filter in memory)
+    let searchFilter: any = null;
+    if (search) {
+      const searchStr = (search as string).toLowerCase();
+      searchFilter = { searchStr, search_by };
+    }
+    
+    // Get all journal entries with lines
+    const entries = await prisma.journalEntry.findMany({
+      where,
+      include: {
+        lines: {
+          include: {
+            account: {
+              include: {
+                subgroup: {
+                  include: {
+                    mainGroup: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: { lineOrder: 'asc' },
+        },
+      },
+      orderBy: [
+        { entryDate: 'desc' },
+        { entryNo: 'desc' },
+      ],
+    });
+    
+    // Flatten entries into individual lines for general journal view
+    let journalLines: any[] = [];
+    let tId = 1;
+    
+    entries.forEach((entry) => {
+      entry.lines.forEach((line) => {
+        const accountName = `${line.account.code} - ${line.account.name}`;
+        const description = line.description || entry.description || '';
+        
+        // Apply search filter if provided
+        if (searchFilter) {
+          const { searchStr, search_by } = searchFilter;
+          if (search_by === 'voucher') {
+            if (!entry.entryNo.toLowerCase().includes(searchStr)) return;
+          } else if (search_by === 'account') {
+            if (!line.account.code.toLowerCase().includes(searchStr) && 
+                !line.account.name.toLowerCase().includes(searchStr)) return;
+          } else if (search_by === 'description') {
+            if (!description.toLowerCase().includes(searchStr) && 
+                !entry.description?.toLowerCase().includes(searchStr)) return;
+          } else {
+            // General search
+            if (!entry.entryNo.toLowerCase().includes(searchStr) &&
+                !(entry.reference?.toLowerCase().includes(searchStr)) &&
+                !description.toLowerCase().includes(searchStr) &&
+                !accountName.toLowerCase().includes(searchStr)) return;
+          }
+        }
+        
+        journalLines.push({
+          id: `${entry.id}-${line.id}`,
+          tId: tId++,
+          voucherNo: entry.entryNo,
+          date: entry.entryDate.toISOString().split('T')[0],
+          account: accountName,
+          description: description,
+          debit: line.debit,
+          credit: line.credit,
+          entryId: entry.id,
+          lineId: line.id,
+        });
+      });
+    });
+    
+    // Pagination
+    const pageNum = parseInt(page as string);
+    const limitNum = parseInt(limit as string);
+    const startIndex = (pageNum - 1) * limitNum;
+    const endIndex = startIndex + limitNum;
+    const paginatedLines = journalLines.slice(startIndex, endIndex);
+    
+    res.json({
+      data: paginatedLines,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total: journalLines.length,
+        totalPages: Math.ceil(journalLines.length / limitNum),
+      },
+    });
+  } catch (error: any) {
+    console.error('Error fetching general journal:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ========== General Ledger ==========
 router.get('/general-ledger', async (req: Request, res: Response) => {
   try {
@@ -502,7 +647,19 @@ router.get('/general-ledger', async (req: Request, res: Response) => {
 // ========== Trial Balance ==========
 router.get('/trial-balance', async (req: Request, res: Response) => {
   try {
-    const { period, type } = req.query;
+    const { period, type, from_date, to_date } = req.query;
+    
+    // Build date filter if provided
+    let dateFilter: any = {};
+    if (from_date || to_date) {
+      dateFilter.entryDate = {};
+      if (from_date) {
+        dateFilter.entryDate.gte = new Date(from_date as string);
+      }
+      if (to_date) {
+        dateFilter.entryDate.lte = new Date(to_date as string);
+      }
+    }
     
     const accounts = await prisma.account.findMany({
       include: {
@@ -513,13 +670,31 @@ router.get('/trial-balance', async (req: Request, res: Response) => {
           where: {
             journalEntry: {
               status: 'posted',
+              ...dateFilter,
             },
           },
         },
       },
+      orderBy: [
+        {
+          subgroup: {
+            mainGroup: {
+              displayOrder: 'asc',
+            },
+          },
+        },
+        {
+          code: 'asc',
+        },
+      ],
     });
     
-    const trialBalance = accounts.map((account) => {
+    // Group accounts by main group and subgroup
+    const groupedData: any[] = [];
+    let currentMainGroup: any = null;
+    let currentSubgroup: any = null;
+    
+    accounts.forEach((account) => {
       const accountType = account.subgroup.mainGroup.type;
       const totalDebit = account.journalLines.reduce((sum, line) => sum + line.debit, 0);
       const totalCredit = account.journalLines.reduce((sum, line) => sum + line.credit, 0);
@@ -535,24 +710,56 @@ router.get('/trial-balance', async (req: Request, res: Response) => {
       // Get trial balance amounts (debit/credit columns)
       const { debit, credit } = getTrialBalanceAmounts(balance, accountType);
       
-      return {
+      // Filter by type if specified
+      if (type && type !== 'all') {
+        if (accountType.toLowerCase() !== (type as string).toLowerCase()) {
+          return;
+        }
+      }
+      
+      const mainGroupCode = account.subgroup.mainGroup.code;
+      const mainGroupName = account.subgroup.mainGroup.name;
+      const subgroupCode = account.subgroup.code;
+      const subgroupName = account.subgroup.name;
+      
+      // Add main group header if changed
+      if (!currentMainGroup || currentMainGroup.code !== mainGroupCode) {
+        currentMainGroup = { code: mainGroupCode, name: mainGroupName };
+        groupedData.push({
+          type: 'mainGroup',
+          code: mainGroupCode,
+          name: `${mainGroupCode}-${mainGroupName}`,
+          debit: 0,
+          credit: 0,
+        });
+      }
+      
+      // Add subgroup header if changed
+      if (!currentSubgroup || currentSubgroup.code !== subgroupCode) {
+        currentSubgroup = { code: subgroupCode, name: subgroupName };
+        groupedData.push({
+          type: 'subgroup',
+          code: subgroupCode,
+          name: `${subgroupCode}-${subgroupName}`,
+          debit: 0,
+          credit: 0,
+        });
+      }
+      
+      // Add account (include all accounts, even with zero balances)
+      groupedData.push({
+        type: 'account',
         accountCode: account.code,
-        accountName: account.name,
+        accountName: `${account.code}-${account.name}`,
         accountType: accountType,
         debit,
         credit,
-      };
-    }).filter((row) => {
-      // Only show accounts with non-zero balances
-      if (row.debit === 0 && row.credit === 0) return false;
-      if (type && type !== 'all') {
-        return row.accountType.toLowerCase() === (type as string).toLowerCase();
-      }
-      return true;
+      });
     });
     
-    res.json(trialBalance);
+    res.json(groupedData);
   } catch (error: any) {
+    console.error('Error fetching trial balance:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -560,7 +767,19 @@ router.get('/trial-balance', async (req: Request, res: Response) => {
 // ========== Financial Statements ==========
 router.get('/income-statement', async (req: Request, res: Response) => {
   try {
-    const { period } = req.query;
+    const { period, from_date, to_date } = req.query;
+    
+    // Build date filter if provided
+    let dateFilter: any = {};
+    if (from_date || to_date) {
+      dateFilter.entryDate = {};
+      if (from_date) {
+        dateFilter.entryDate.gte = new Date(from_date as string);
+      }
+      if (to_date) {
+        dateFilter.entryDate.lte = new Date(to_date as string);
+      }
+    }
     
     const revenueAccounts = await prisma.account.findMany({
       where: {
@@ -578,17 +797,22 @@ router.get('/income-statement', async (req: Request, res: Response) => {
           where: {
             journalEntry: {
               status: 'posted',
+              ...dateFilter,
             },
           },
         },
       },
+      orderBy: {
+        code: 'asc',
+      },
     });
     
-    const expenseAccounts = await prisma.account.findMany({
+    // Separate cost accounts from expense accounts
+    const costAccounts = await prisma.account.findMany({
       where: {
         subgroup: {
           mainGroup: {
-            type: { in: ['expense', 'cost'] },
+            type: { in: ['cost'] },
           },
         },
       },
@@ -600,14 +824,45 @@ router.get('/income-statement', async (req: Request, res: Response) => {
           where: {
             journalEntry: {
               status: 'posted',
+              ...dateFilter,
             },
           },
         },
+      },
+      orderBy: {
+        code: 'asc',
+      },
+    });
+    
+    const expenseAccounts = await prisma.account.findMany({
+      where: {
+        subgroup: {
+          mainGroup: {
+            type: { in: ['expense'] },
+          },
+        },
+      },
+      include: {
+        subgroup: {
+          include: { mainGroup: true },
+        },
+        journalLines: {
+          where: {
+            journalEntry: {
+              status: 'posted',
+              ...dateFilter,
+            },
+          },
+        },
+      },
+      orderBy: {
+        code: 'asc',
       },
     });
     
     // Group by subgroup
     const revenueCategories: any[] = [];
+    const costCategories: any[] = [];
     const expenseCategories: any[] = [];
     
     // Process revenues (Revenue accounts: normal balance is CREDIT)
@@ -630,13 +885,42 @@ router.get('/income-statement', async (req: Request, res: Response) => {
       );
       
       revenueBySubgroup[subGroupName].push({
-        name: account.name,
+        name: `${account.code}-${account.name}`,
         amount: revenueAmount > 0 ? revenueAmount : 0,
       });
     });
     
     Object.entries(revenueBySubgroup).forEach(([name, items]) => {
       revenueCategories.push({ name, items });
+    });
+    
+    // Process costs (Cost accounts: normal balance is DEBIT)
+    // Cost = openingBalance + debits - credits
+    const costBySubgroup: Record<string, any[]> = {};
+    costAccounts.forEach((account) => {
+      const subGroupName = account.subgroup.name;
+      if (!costBySubgroup[subGroupName]) {
+        costBySubgroup[subGroupName] = [];
+      }
+      const totalDebit = account.journalLines.reduce((sum, line) => sum + line.debit, 0);
+      const totalCredit = account.journalLines.reduce((sum, line) => sum + line.credit, 0);
+      
+      // Cost balance: openingBalance + debits - credits
+      const costAmount = calculateAccountBalance(
+        account.openingBalance,
+        totalDebit,
+        totalCredit,
+        'cost'
+      );
+      
+      costBySubgroup[subGroupName].push({
+        name: `${account.code}-${account.name}`,
+        amount: costAmount > 0 ? costAmount : 0,
+      });
+    });
+    
+    Object.entries(costBySubgroup).forEach(([name, items]) => {
+      costCategories.push({ name, items });
     });
     
     // Process expenses (Expense accounts: normal balance is DEBIT)
@@ -659,7 +943,7 @@ router.get('/income-statement', async (req: Request, res: Response) => {
       );
       
       expenseBySubgroup[subGroupName].push({
-        name: account.name,
+        name: `${account.code}-${account.name}`,
         amount: expenseAmount > 0 ? expenseAmount : 0,
       });
     });
@@ -668,7 +952,11 @@ router.get('/income-statement', async (req: Request, res: Response) => {
       expenseCategories.push({ name, items });
     });
     
-    res.json({ revenue: revenueCategories, expenses: expenseCategories });
+    res.json({ 
+      revenue: revenueCategories, 
+      cost: costCategories,
+      expenses: expenseCategories 
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -726,7 +1014,13 @@ router.post('/recalculate-balances', async (req: Request, res: Response) => {
 
 router.get('/balance-sheet', async (req: Request, res: Response) => {
   try {
-    const { period } = req.query;
+    const { period, as_of_date } = req.query;
+    
+    // Build date filter if provided
+    let dateFilter: any = {};
+    if (as_of_date) {
+      dateFilter.entryDate = { lte: new Date(as_of_date as string) };
+    }
     
     const assetAccounts = await prisma.account.findMany({
       where: {
@@ -744,9 +1038,13 @@ router.get('/balance-sheet', async (req: Request, res: Response) => {
           where: {
             journalEntry: {
               status: 'posted',
+              ...dateFilter,
             },
           },
         },
+      },
+      orderBy: {
+        code: 'asc',
       },
     });
     
@@ -766,9 +1064,13 @@ router.get('/balance-sheet', async (req: Request, res: Response) => {
           where: {
             journalEntry: {
               status: 'posted',
+              ...dateFilter,
             },
           },
         },
+      },
+      orderBy: {
+        code: 'asc',
       },
     });
     
@@ -788,20 +1090,31 @@ router.get('/balance-sheet', async (req: Request, res: Response) => {
           where: {
             journalEntry: {
               status: 'posted',
+              ...dateFilter,
             },
           },
         },
       },
+      orderBy: {
+        code: 'asc',
+      },
     });
     
-    // Group by main group or subgroup with proper balance calculations
+    // Group by subgroup with proper balance calculations
     const processAccounts = (accounts: any[], accountType: string) => {
-      const byCategory: Record<string, any[]> = {};
+      const bySubgroup: Record<string, any[]> = {};
+      
       accounts.forEach((account) => {
-        const categoryName = account.subgroup.mainGroup.name;
-        if (!byCategory[categoryName]) {
-          byCategory[categoryName] = [];
+        const subgroupName = account.subgroup.name;
+        const mainGroupName = account.subgroup.mainGroup.name;
+        
+        // Use subgroup name as category, or main group if subgroup is not meaningful
+        const categoryName = subgroupName || mainGroupName;
+        
+        if (!bySubgroup[categoryName]) {
+          bySubgroup[categoryName] = [];
         }
+        
         const totalDebit = account.journalLines.reduce((sum: number, line: any) => sum + line.debit, 0);
         const totalCredit = account.journalLines.reduce((sum: number, line: any) => sum + line.credit, 0);
         
@@ -813,15 +1126,30 @@ router.get('/balance-sheet', async (req: Request, res: Response) => {
           accountType
         );
         
-        // For balance sheet, show absolute value (assets are positive, liabilities/equity shown as positive)
-        const displayAmount = accountType === 'asset' ? balance : Math.abs(balance);
+        // For balance sheet:
+        // - Assets: show positive balance (debit normal)
+        // - Liabilities/Equity: show positive balance (credit normal, but we show as positive)
+        const displayAmount = accountType === 'asset' 
+          ? (balance > 0 ? balance : 0)  // Assets should be positive
+          : (balance < 0 ? Math.abs(balance) : balance);  // Liabilities/Equity shown as positive
         
-        byCategory[categoryName].push({
-          name: account.name,
+        // Format account name with code: "code-name"
+        const accountDisplayName = `${account.code}-${account.name}`;
+        
+        // Include all accounts, even with zero balances
+        bySubgroup[categoryName].push({
+          name: accountDisplayName,
           amount: displayAmount,
         });
       });
-      return Object.entries(byCategory).map(([name, items]) => ({ name, items }));
+      
+      // Convert to array format expected by frontend, sorted by category name
+      return Object.entries(bySubgroup)
+        .map(([name, items]) => ({ 
+          name, 
+          items: items.sort((a, b) => a.name.localeCompare(b.name))
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
     };
     
     res.json({
@@ -830,9 +1158,11 @@ router.get('/balance-sheet', async (req: Request, res: Response) => {
       equity: processAccounts(equityAccounts, 'equity'),
     });
   } catch (error: any) {
+    console.error('Error fetching balance sheet:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
 export default router;
+
 

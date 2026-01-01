@@ -19,6 +19,16 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -30,28 +40,18 @@ import { toast } from "sonner";
 interface Subgroup {
   id: string;
   mainGroup: string;
+  mainGroupId: string;
   code: string;
   name: string;
   isActive: boolean;
   canDelete: boolean;
 }
 
-const mainGroupOptions = [
-  "Current Assets",
-  "Long Term Assets",
-  "Current Liabilities",
-  "Long Term Liabilities",
-  "Capital",
-  "Drawings",
-  "Revenues",
-  "Expenses",
-  "Cost",
-];
-
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
 export const SubgroupsTab = () => {
   const [subgroups, setSubgroups] = useState<Subgroup[]>([]);
+  const [mainGroups, setMainGroups] = useState<{ id: string; name: string; code: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [filterMainGroup, setFilterMainGroup] = useState<string>("all");
@@ -60,32 +60,59 @@ export const SubgroupsTab = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [editingSubgroup, setEditingSubgroup] = useState<Subgroup | null>(null);
-  const [formData, setFormData] = useState({ mainGroup: "", name: "" });
+  const [deletingSubgroup, setDeletingSubgroup] = useState<Subgroup | null>(null);
+  const [formData, setFormData] = useState({ mainGroup: "", name: "", code: "" });
 
   useEffect(() => {
-    fetchSubgroups();
     fetchMainGroups();
+    fetchSubgroups();
   }, []);
 
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterMainGroup, filterStatus, pageSize]);
+
   const fetchMainGroups = async () => {
-    // Main groups are already defined in the component
+    try {
+      const response = await fetch(`${API_URL}/api/accounting/main-groups`);
+      if (response.ok) {
+        const data = await response.json();
+        setMainGroups(data);
+      }
+    } catch (error) {
+      console.error("Error fetching main groups:", error);
+    }
   };
 
   const fetchSubgroups = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_URL}/api/accounting/subgroups`);
+      const params = new URLSearchParams();
+      if (filterMainGroup !== "all") {
+        const mainGroup = mainGroups.find(mg => mg.name === filterMainGroup || mg.id === filterMainGroup);
+        if (mainGroup) {
+          params.append("mainGroupId", mainGroup.id);
+        }
+      }
+      if (filterStatus !== "all") {
+        params.append("isActive", filterStatus === "active" ? "true" : "false");
+      }
+      
+      const response = await fetch(`${API_URL}/api/accounting/subgroups?${params}`);
       if (response.ok) {
         const data = await response.json();
         // Transform API data to match component interface
         const transformed = data.map((sg: any) => ({
           id: sg.id,
-          mainGroup: sg.mainGroup?.name || sg.mainGroupId,
+          mainGroup: sg.mainGroup?.name || "",
+          mainGroupId: sg.mainGroupId || "",
           code: sg.code,
           name: sg.name,
-          isActive: sg.isActive,
-          canDelete: sg.canDelete,
+          isActive: sg.isActive !== undefined ? sg.isActive : true,
+          canDelete: sg.canDelete !== undefined ? sg.canDelete : true,
         }));
         setSubgroups(transformed);
       } else {
@@ -99,13 +126,20 @@ export const SubgroupsTab = () => {
     }
   };
 
+  // Refetch when filters change
+  useEffect(() => {
+    if (mainGroups.length > 0) {
+      fetchSubgroups();
+    }
+  }, [filterMainGroup, filterStatus]);
+
   const filteredSubgroups = subgroups.filter((sg) => {
     const matchesGroup = filterMainGroup === "all" || sg.mainGroup === filterMainGroup;
     const matchesStatus = filterStatus === "all" || (filterStatus === "active" ? sg.isActive : !sg.isActive);
     return matchesGroup && matchesStatus;
   });
 
-  const totalPages = Math.ceil(filteredSubgroups.length / parseInt(pageSize));
+  const totalPages = Math.ceil(filteredSubgroups.length / parseInt(pageSize)) || 1;
   const paginatedSubgroups = filteredSubgroups.slice(
     (currentPage - 1) * parseInt(pageSize),
     currentPage * parseInt(pageSize)
@@ -128,65 +162,80 @@ export const SubgroupsTab = () => {
   };
 
   const handleAddSubgroup = async () => {
-    if (!formData.mainGroup || !formData.name) {
-      toast.error("Please fill all required fields");
+    if (!formData.mainGroup || !formData.name.trim()) {
+      toast.error("Please fill all required fields (Main Group and Name)");
       return;
     }
+
     try {
       // Find main group ID
-      const mainGroupsResponse = await fetch(`${API_URL}/api/accounting/main-groups`);
-      const mainGroups = await mainGroupsResponse.json();
-      const mainGroup = mainGroups.find((mg: any) => mg.name === formData.mainGroup);
+      const mainGroup = mainGroups.find((mg: any) => mg.name === formData.mainGroup || mg.id === formData.mainGroup);
       
       if (!mainGroup) {
         toast.error("Main group not found");
         return;
       }
 
-      // Generate code
-      const existingCodes = subgroups.map(s => parseInt(s.code.replace(/\D/g, ''))).filter(c => !isNaN(c));
-      const nextCode = existingCodes.length > 0 ? Math.max(...existingCodes) + 1 : 101;
-      const code = `${nextCode}-${formData.name}`;
+      // Generate code - use provided code or auto-generate
+      let code = formData.code.trim();
+      if (!code) {
+        // Auto-generate code based on main group code and existing subgroups
+        const mainGroupSubgroups = subgroups.filter(sg => sg.mainGroupId === mainGroup.id);
+        const existingCodes = mainGroupSubgroups.map(s => {
+          const num = parseInt(s.code.replace(/\D/g, ''));
+          return isNaN(num) ? 0 : num;
+        });
+        const nextNum = existingCodes.length > 0 ? Math.max(...existingCodes) + 1 : 1;
+        code = `${mainGroup.code}${String(nextNum).padStart(2, '0')}`;
+      }
 
       const response = await fetch(`${API_URL}/api/accounting/subgroups`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mainGroupId: mainGroup.id,
-          code,
-          name: formData.name,
+          code: code.trim(),
+          name: formData.name.trim(),
           isActive: true,
           canDelete: true,
         }),
       });
 
       if (response.ok) {
+        const newSubgroup = await response.json();
+        toast.success(`Subgroup "${newSubgroup.name}" added successfully!`);
         await fetchSubgroups();
         setIsAddDialogOpen(false);
-        setFormData({ mainGroup: "", name: "" });
-        toast.success("Subgroup added successfully!");
+        resetForm();
       } else {
         const error = await response.json();
         toast.error(error.error || "Failed to add subgroup");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error adding subgroup:", error);
-      toast.error("Error adding subgroup");
+      toast.error(error.message || "Error adding subgroup");
     }
   };
 
   const handleEditSubgroup = (subgroup: Subgroup) => {
     setEditingSubgroup(subgroup);
-    setFormData({ mainGroup: subgroup.mainGroup, name: subgroup.name });
+    setFormData({ 
+      mainGroup: subgroup.mainGroup, 
+      name: subgroup.name,
+      code: subgroup.code,
+    });
     setIsEditDialogOpen(true);
   };
 
   const handleUpdateSubgroup = async () => {
     if (!editingSubgroup) return;
+    if (!formData.mainGroup || !formData.name.trim()) {
+      toast.error("Please fill all required fields");
+      return;
+    }
+
     try {
-      const mainGroupsResponse = await fetch(`${API_URL}/api/accounting/main-groups`);
-      const mainGroups = await mainGroupsResponse.json();
-      const mainGroup = mainGroups.find((mg: any) => mg.name === formData.mainGroup);
+      const mainGroup = mainGroups.find((mg: any) => mg.name === formData.mainGroup || mg.id === formData.mainGroup);
       
       if (!mainGroup) {
         toast.error("Main group not found");
@@ -198,7 +247,7 @@ export const SubgroupsTab = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mainGroupId: mainGroup.id,
-          name: formData.name,
+          name: formData.name.trim(),
           isActive: editingSubgroup.isActive,
         }),
       });
@@ -207,64 +256,143 @@ export const SubgroupsTab = () => {
         await fetchSubgroups();
         setIsEditDialogOpen(false);
         setEditingSubgroup(null);
-        setFormData({ mainGroup: "", name: "" });
+        resetForm();
         toast.success("Subgroup updated successfully!");
       } else {
         const error = await response.json();
         toast.error(error.error || "Failed to update subgroup");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating subgroup:", error);
-      toast.error("Error updating subgroup");
+      toast.error(error.message || "Error updating subgroup");
     }
   };
 
-  const handleDeleteSubgroup = async (id: string) => {
+  const handleOpenDeleteDialog = (subgroup: Subgroup) => {
+    setDeletingSubgroup(subgroup);
+    setIsDeleteDialogOpen(true);
+  };
+
+  const handleDeleteSubgroup = async () => {
+    if (!deletingSubgroup) return;
+
     try {
-      const response = await fetch(`${API_URL}/api/accounting/subgroups/${id}`, {
+      const response = await fetch(`${API_URL}/api/accounting/subgroups/${deletingSubgroup.id}`, {
         method: 'DELETE',
       });
 
       if (response.ok) {
         await fetchSubgroups();
+        setIsDeleteDialogOpen(false);
+        setDeletingSubgroup(null);
         toast.success("Subgroup deleted successfully!");
       } else {
         const error = await response.json();
         toast.error(error.error || "Failed to delete subgroup");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error deleting subgroup:", error);
-      toast.error("Error deleting subgroup");
+      toast.error(error.message || "Error deleting subgroup");
     }
   };
 
+  const resetForm = () => {
+    setFormData({ mainGroup: "", name: "", code: "" });
+  };
+
   const handleReset = () => {
-    setFormData({ mainGroup: "", name: "" });
+    resetForm();
   };
 
-  const handleExportCSV = () => {
-    const csvContent = [
-      ["Main Group", "Code", "Sub Group", "Status"].join(","),
-      ...filteredSubgroups.map(sg => [
-        sg.mainGroup,
-        sg.code,
-        sg.name,
-        sg.isActive ? "Active" : "Inactive"
-      ].join(","))
-    ].join("\n");
-    
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `subgroups_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    toast.success("Subgroups exported to CSV successfully!");
+  const handleExportCSV = async () => {
+    try {
+      toast.success("Fetching all subgroups for export...");
+      
+      // Fetch all subgroups (no pagination)
+      const params = new URLSearchParams();
+      if (filterMainGroup !== "all") {
+        const mainGroup = mainGroups.find(mg => mg.name === filterMainGroup || mg.id === filterMainGroup);
+        if (mainGroup) {
+          params.append("mainGroupId", mainGroup.id);
+        }
+      }
+      if (filterStatus !== "all") {
+        params.append("isActive", filterStatus === "active" ? "true" : "false");
+      }
+      
+      const response = await fetch(`${API_URL}/api/accounting/subgroups?${params}`);
+      if (!response.ok) {
+        throw new Error("Failed to fetch subgroups");
+      }
+      
+      const data = await response.json();
+      const allSubgroups = data.map((sg: any) => ({
+        id: sg.id,
+        mainGroup: sg.mainGroup?.name || "",
+        mainGroupId: sg.mainGroupId || "",
+        code: sg.code,
+        name: sg.name,
+        isActive: sg.isActive !== undefined ? sg.isActive : true,
+        canDelete: sg.canDelete !== undefined ? sg.canDelete : true,
+      }));
+      
+      const csvContent = [
+        ["Main Group", "Code", "Sub Group", "Status"].join(","),
+        ...allSubgroups.map(sg => [
+          sg.mainGroup,
+          sg.code,
+          sg.name,
+          sg.isActive ? "Active" : "Inactive"
+        ].join(","))
+      ].join("\n");
+      
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `subgroups_${new Date().toISOString().split('T')[0]}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success(`${allSubgroups.length} subgroups exported to CSV successfully!`);
+    } catch (error) {
+      console.error("Error exporting subgroups:", error);
+      toast.error("Failed to export subgroups");
+    }
   };
 
-  const handlePrintList = () => {
-    const printHTML = `
+  const handlePrintList = async () => {
+    try {
+      toast.success("Fetching all subgroups for printing...");
+      
+      // Fetch all subgroups (no pagination)
+      const params = new URLSearchParams();
+      if (filterMainGroup !== "all") {
+        const mainGroup = mainGroups.find(mg => mg.name === filterMainGroup || mg.id === filterMainGroup);
+        if (mainGroup) {
+          params.append("mainGroupId", mainGroup.id);
+        }
+      }
+      if (filterStatus !== "all") {
+        params.append("isActive", filterStatus === "active" ? "true" : "false");
+      }
+      
+      const response = await fetch(`${API_URL}/api/accounting/subgroups?${params}`);
+      if (!response.ok) {
+        throw new Error("Failed to fetch subgroups");
+      }
+      
+      const data = await response.json();
+      const allSubgroups = data.map((sg: any) => ({
+        id: sg.id,
+        mainGroup: sg.mainGroup?.name || "",
+        mainGroupId: sg.mainGroupId || "",
+        code: sg.code,
+        name: sg.name,
+        isActive: sg.isActive !== undefined ? sg.isActive : true,
+        canDelete: sg.canDelete !== undefined ? sg.canDelete : true,
+      }));
+      
+      const printHTML = `
       <html>
         <head>
           <title>Subgroups List</title>
@@ -289,7 +417,7 @@ export const SubgroupsTab = () => {
               </tr>
             </thead>
             <tbody>
-              ${filteredSubgroups.map(sg => `
+              ${allSubgroups.map(sg => `
                 <tr>
                   <td>${sg.mainGroup}</td>
                   <td>${sg.code}</td>
@@ -303,13 +431,17 @@ export const SubgroupsTab = () => {
         </body>
       </html>
     `;
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(printHTML);
-      printWindow.document.close();
-      printWindow.print();
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(printHTML);
+        printWindow.document.close();
+        printWindow.print();
+      }
+      toast.success(`${allSubgroups.length} subgroups ready for printing`);
+    } catch (error) {
+      console.error("Error printing subgroups:", error);
+      toast.error("Failed to prepare subgroups for printing");
     }
-    toast.success("Subgroups list opened for printing");
   };
 
   return (
@@ -322,7 +454,10 @@ export const SubgroupsTab = () => {
           </div>
           <div className="flex items-center gap-2">
             <Button
-              onClick={() => setIsAddDialogOpen(true)}
+              onClick={() => {
+                resetForm();
+                setIsAddDialogOpen(true);
+              }}
               variant="outline"
               size="sm"
               className="transition-all duration-200 hover:scale-105"
@@ -358,9 +493,9 @@ export const SubgroupsTab = () => {
                 </SelectTrigger>
                 <SelectContent className="bg-card border-border z-50">
                   <SelectItem value="all">All Groups</SelectItem>
-                  {mainGroupOptions.map((group) => (
-                    <SelectItem key={group} value={group}>
-                      {group}
+                  {mainGroups.map((group) => (
+                    <SelectItem key={group.id} value={group.name}>
+                      {group.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -407,7 +542,20 @@ export const SubgroupsTab = () => {
                 </tr>
               </thead>
               <tbody>
-                {paginatedSubgroups.map((subgroup, index) => (
+                {loading ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                      Loading subgroups...
+                    </td>
+                  </tr>
+                ) : paginatedSubgroups.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                      No subgroups found. Click "Add New Subgroup" to create one.
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedSubgroups.map((subgroup, index) => (
                   <tr
                     key={subgroup.id}
                     className={`border-b border-border/50 transition-colors duration-200 hover:bg-muted/30 ${
@@ -423,7 +571,7 @@ export const SubgroupsTab = () => {
                       />
                     </td>
                     <td className="p-3">
-                      <div className="w-3 h-3 rounded-full bg-success"></div>
+                      <div className={`w-3 h-3 rounded-full ${subgroup.isActive ? "bg-success" : "bg-muted"}`}></div>
                     </td>
                     <td className="p-3 text-primary font-medium">{subgroup.mainGroup}</td>
                     <td className="p-3 font-medium">{subgroup.code}</td>
@@ -443,7 +591,7 @@ export const SubgroupsTab = () => {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDeleteSubgroup(subgroup.id)}
+                            onClick={() => handleOpenDeleteDialog(subgroup)}
                             className="text-destructive hover:text-destructive/80 transition-colors"
                           >
                             <Trash2 className="h-4 w-4 mr-1" />
@@ -453,15 +601,16 @@ export const SubgroupsTab = () => {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  ))
+                )}
               </tbody>
             </table>
           </div>
 
           <div className="flex flex-col sm:flex-row items-center justify-between mt-4 gap-4">
             <p className="text-sm text-muted-foreground">
-              Showing <span className="text-primary">1</span> to{" "}
-              <span className="text-primary">{Math.min(parseInt(pageSize), filteredSubgroups.length)}</span> of{" "}
+              Showing <span className="text-primary">{filteredSubgroups.length > 0 ? (currentPage - 1) * parseInt(pageSize) + 1 : 0}</span> to{" "}
+              <span className="text-primary">{Math.min(currentPage * parseInt(pageSize), filteredSubgroups.length)}</span> of{" "}
               <span className="text-primary">{filteredSubgroups.length}</span> items
             </p>
             <div className="flex items-center gap-2">
@@ -484,17 +633,30 @@ export const SubgroupsTab = () => {
                 >
                   {"<"}
                 </Button>
-                {Array.from({ length: Math.min(totalPages, 3) }, (_, i) => i + 1).map((page) => (
-                  <Button
-                    key={page}
-                    variant={currentPage === page ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setCurrentPage(page)}
-                    className="transition-all duration-200"
-                  >
-                    {page}
-                  </Button>
-                ))}
+                {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  return (
+                    <Button
+                      key={pageNum}
+                      variant={currentPage === pageNum ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setCurrentPage(pageNum)}
+                      className="transition-all duration-200"
+                    >
+                      {pageNum}
+                    </Button>
+                  );
+                })}
+                {totalPages > 5 && <span className="px-2">...</span>}
                 <Button
                   variant="outline"
                   size="sm"
@@ -546,42 +708,44 @@ export const SubgroupsTab = () => {
                   <SelectValue placeholder="Select..." />
                 </SelectTrigger>
                 <SelectContent className="bg-card border-border z-50">
-                  {mainGroupOptions.map((group) => (
-                    <SelectItem key={group} value={group}>
-                      {group}
+                  {mainGroups.map((group) => (
+                    <SelectItem key={group.id} value={group.name}>
+                      {group.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Account Name</Label>
+              <Label>Account Name *</Label>
               <Input
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="Enter subgroup name"
+                className={!formData.name.trim() ? "border-destructive" : ""}
+              />
+              {!formData.name.trim() && (
+                <p className="text-sm text-destructive">name</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Code (Optional - Auto-generated if empty)</Label>
+              <Input
+                value={formData.code}
+                onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                placeholder="e.g., 101, 201 (leave empty to auto-generate)"
               />
             </div>
           </div>
-          <DialogFooter className="flex justify-between sm:justify-between">
-            <Button variant="outline" onClick={handleReset}>
-              <RotateCcw className="h-4 w-4 mr-1" />
-              Reset
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setIsAddDialogOpen(false); resetForm(); }}>
+              Cancel
             </Button>
-            <div className="flex gap-2">
-              <Button onClick={handleAddSubgroup}>
-                <Save className="h-4 w-4 mr-1" />
-                Save
-              </Button>
-            </div>
+            <Button onClick={handleAddSubgroup} className="bg-primary text-primary-foreground hover:bg-primary/90">
+              <Save className="h-4 w-4 mr-1" />
+              Add Subgroup
+            </Button>
           </DialogFooter>
-          <Button
-            variant="link"
-            onClick={() => setIsAddDialogOpen(false)}
-            className="text-primary absolute bottom-4 right-4"
-          >
-            Close
-          </Button>
         </DialogContent>
       </Dialog>
 
@@ -602,42 +766,70 @@ export const SubgroupsTab = () => {
                   <SelectValue placeholder="Select..." />
                 </SelectTrigger>
                 <SelectContent className="bg-card border-border z-50">
-                  {mainGroupOptions.map((group) => (
-                    <SelectItem key={group} value={group}>
-                      {group}
+                  {mainGroups.map((group) => (
+                    <SelectItem key={group.id} value={group.name}>
+                      {group.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Account Name</Label>
+              <Label>Account Name *</Label>
               <Input
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="Enter subgroup name"
+                className={!formData.name.trim() ? "border-destructive" : ""}
+              />
+              {!formData.name.trim() && (
+                <p className="text-sm text-destructive">name</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Code (Optional - Auto-generated if empty)</Label>
+              <Input
+                value={formData.code}
+                onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                placeholder="e.g., 101, 201 (leave empty to auto-generate)"
               />
             </div>
           </div>
-          <DialogFooter className="flex justify-between sm:justify-between">
-            <Button variant="outline" onClick={handleReset}>
-              <RotateCcw className="h-4 w-4 mr-1" />
-              Reset
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setIsEditDialogOpen(false); setEditingSubgroup(null); resetForm(); }}>
+              Cancel
             </Button>
-            <Button onClick={handleUpdateSubgroup}>
+            <Button onClick={handleUpdateSubgroup} className="bg-primary text-primary-foreground hover:bg-primary/90">
               <Save className="h-4 w-4 mr-1" />
-              Update
+              Update Subgroup
             </Button>
           </DialogFooter>
-          <Button
-            variant="link"
-            onClick={() => setIsEditDialogOpen(false)}
-            className="text-primary absolute bottom-4 right-4"
-          >
-            Close
-          </Button>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will delete the subgroup "{deletingSubgroup?.name}". This action cannot be undone.
+              If this subgroup has accounts, they will also be affected.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { setIsDeleteDialogOpen(false); setDeletingSubgroup(null); }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteSubgroup}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 };

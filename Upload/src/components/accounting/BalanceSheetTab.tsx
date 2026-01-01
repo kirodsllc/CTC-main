@@ -33,6 +33,17 @@ export const BalanceSheetTab = () => {
       const params = new URLSearchParams();
       params.append("period", period);
       
+      // Convert period to date if needed
+      let asOfDate = new Date().toISOString().split('T')[0];
+      if (period === "december-2024") {
+        asOfDate = "2024-12-31";
+      } else if (period === "september-2024") {
+        asOfDate = "2024-09-30";
+      } else if (period === "june-2024") {
+        asOfDate = "2024-06-30";
+      }
+      params.append("as_of_date", asOfDate);
+      
       const response = await fetch(`${API_URL}/api/accounting/balance-sheet?${params}`);
       if (response.ok) {
         const data = await response.json();
@@ -49,6 +60,9 @@ export const BalanceSheetTab = () => {
         if (data.equity && data.equity.length > 0) {
           setExpandedEquity([data.equity[0].name]);
         }
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("Error fetching balance sheet:", errorData.error || response.statusText);
       }
     } catch (error) {
       console.error("Error fetching balance sheet:", error);

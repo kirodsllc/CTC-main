@@ -1,9 +1,10 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { apiClient } from "@/lib/api";
 import {
   Table,
   TableBody,
@@ -80,23 +81,13 @@ interface SalesReturn {
   originalInvoiceNo?: string;
 }
 
-const mockReturns: SalesReturn[] = [];
-
-const mockItems: { id: string; name: string; partNo: string }[] = [
-  { id: "1", name: "Brake Pad", partNo: "TEST001" },
-  { id: "2", name: "Air Filter", partNo: "TEST002" },
-  { id: "3", name: "Oil Filter", partNo: "ENG-001" },
-];
-
-const mockCustomers: { id: string; name: string }[] = [
-  { id: "1", name: "ABC Auto Parts" },
-  { id: "2", name: "XYZ Trading Co" },
-  { id: "3", name: "Quick Service Center" },
-];
 
 export const SalesReturns = () => {
-  const [returns, setReturns] = useState<SalesReturn[]>(mockReturns);
+  const [returns, setReturns] = useState<SalesReturn[]>([]);
   const [selectedReturns, setSelectedReturns] = useState<string[]>([]);
+  const [loadingReturns, setLoadingReturns] = useState(false);
+  const [availableItems, setAvailableItems] = useState<{ id: string; name: string; partNo: string }[]>([]);
+  const [availableCustomers, setAvailableCustomers] = useState<{ id: string; name: string }[]>([]);
 
   // Filter states
   const [filterItemType, setFilterItemType] = useState("");
@@ -115,9 +106,101 @@ export const SalesReturns = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
+  // Fetch returns from database/localStorage
+  useEffect(() => {
+    const fetchReturns = async () => {
+      setLoadingReturns(true);
+      try {
+        // TODO: Replace with API call when endpoint is available
+        // const response = await apiClient.getSalesReturns();
+        // if (response.data) {
+        //   setReturns(response.data);
+        // }
+        
+        // For now, use localStorage
+        const storedReturns = localStorage.getItem('salesReturns');
+        if (storedReturns) {
+          setReturns(JSON.parse(storedReturns));
+        }
+      } catch (error: any) {
+        console.error('Error fetching returns:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load sales returns",
+          variant: "destructive",
+        });
+      } finally {
+        setLoadingReturns(false);
+      }
+    };
+
+    fetchReturns();
+  }, []);
+
+  // Fetch parts/items from database for filters
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        const response = await apiClient.getParts({ 
+          status: 'active',
+          limit: 1000,
+          page: 1 
+        });
+
+        if (response.error) {
+          console.error('Error fetching parts:', response.error);
+          return;
+        }
+
+        let partsDataArray: any[] = [];
+        if (Array.isArray(response)) {
+          partsDataArray = response;
+        } else if (response.data && Array.isArray(response.data)) {
+          partsDataArray = response.data;
+        } else if (response.pagination && response.data) {
+          partsDataArray = response.data;
+        }
+
+        const transformedItems = partsDataArray
+          .filter((p: any) => p.status === 'active' || !p.status)
+          .map((p: any) => ({
+            id: p.id,
+            name: String(p.description || p.part_no || '').trim() || 'No description',
+            partNo: String(p.part_no || p.partNo || '').trim(),
+          }))
+          .filter((item: any) => item.partNo && item.partNo.trim() !== '');
+
+        setAvailableItems(transformedItems);
+      } catch (error: any) {
+        console.error('Error fetching items:', error);
+      }
+    };
+
+    fetchItems();
+  }, []);
+
+  // Extract unique customers from returns for filter dropdown
+  useEffect(() => {
+    const uniqueCustomers = Array.from(
+      new Set(returns.map(r => r.customerName))
+    ).map((name, index) => ({
+      id: String(index + 1),
+      name: name,
+    }));
+    setAvailableCustomers(uniqueCustomers);
+  }, [returns]);
+
+  // Save returns to localStorage (temporary until API is ready)
+  useEffect(() => {
+    if (returns.length > 0) {
+      localStorage.setItem('salesReturns', JSON.stringify(returns));
+    }
+  }, [returns]);
+
   const filteredReturns = returns.filter((item) => {
     const matchesItemType = !filterItemType || filterItemType === "all";
-    const matchesItem = !filterItem || filterItem === "all";
+    const matchesItem = !filterItem || filterItem === "all" || 
+      item.items.some(i => i.partNo === filterItem || i.itemName.toLowerCase().includes(filterItem.toLowerCase()));
     const matchesCustomer = !filterCustomer || filterCustomer === "all" || item.customerName === filterCustomer;
     const matchesCustomerName = !customerNameSearch || item.customerName.toLowerCase().includes(customerNameSearch.toLowerCase());
     return matchesItemType && matchesItem && matchesCustomer && matchesCustomerName;
@@ -147,9 +230,10 @@ export const SalesReturns = () => {
 
   const handleSearch = () => {
     setCurrentPage(1);
+    const filteredCount = filteredReturns.length;
     toast({
       title: "Search Applied",
-      description: "Filters have been applied to the returns list.",
+      description: `Found ${filteredCount} return${filteredCount !== 1 ? 's' : ''} matching your filters.`,
     });
   };
 
@@ -163,9 +247,25 @@ export const SalesReturns = () => {
     setIsDeleteConfirmOpen(true);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (returnToDelete) {
+      // TODO: Add API call when endpoint is available
+      // try {
+      //   const response = await apiClient.deleteSalesReturn(returnToDelete.id);
+      //   if (response.error) {
+      //     throw new Error(response.error);
+      //   }
+      // } catch (error: any) {
+      //   toast({
+      //     title: "Error",
+      //     description: error.message || "Failed to delete return",
+      //     variant: "destructive",
+      //   });
+      //   return;
+      // }
+
       setReturns(returns.filter((r) => r.id !== returnToDelete.id));
+      setSelectedReturns(selectedReturns.filter(id => id !== returnToDelete.id));
       toast({
         title: "Return Deleted",
         description: `Return Invoice ${returnToDelete.invoiceNo} has been deleted successfully.`,
@@ -369,9 +469,9 @@ export const SalesReturns = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Items</SelectItem>
-                  {mockItems.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.name}
+                  {availableItems.map((item) => (
+                    <SelectItem key={item.id} value={item.partNo}>
+                      {item.name} ({item.partNo})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -386,7 +486,7 @@ export const SalesReturns = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Customers</SelectItem>
-                  {mockCustomers.map((customer) => (
+                  {availableCustomers.map((customer) => (
                     <SelectItem key={customer.id} value={customer.name}>
                       {customer.name}
                     </SelectItem>
@@ -443,10 +543,18 @@ export const SalesReturns = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginatedReturns.length === 0 ? (
+                {loadingReturns ? (
                   <TableRow>
                     <TableCell colSpan={11} className="text-center py-8 text-muted-foreground text-xs">
-                      No return orders found
+                      Loading returns...
+                    </TableCell>
+                  </TableRow>
+                ) : paginatedReturns.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground text-xs">
+                      {filterItemType || filterItem !== "all" || filterCustomer !== "all" || customerNameSearch
+                        ? "No return orders found matching your filters"
+                        : "No return orders found. Returns will appear here once created."}
                     </TableCell>
                   </TableRow>
                 ) : (
